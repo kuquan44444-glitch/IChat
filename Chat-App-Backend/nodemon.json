@@ -1,0 +1,7 @@
+{
+  "env": {
+    "SG_KEY": "your_sendgrid_api_key_here",
+    "ZEGO_APP_ID": "your_zego_app_id_here",
+    "ZEGO_SERVER_SECRET": "your_zego_server_secret_here"
+  }
+}
