@@ -1,11 +1,25 @@
 import io from "socket.io-client"; // Add this
+import { SOCKET_URL } from "./config";
 
 let socket;
 
 const connectSocket = (user_id) => {
-  socket = io("https://api.chat.codingmonk.in/", {
-    query: `user_id=${user_id}`,
-  });
-} // Add this -- our server will run on port 4000, so we connect to it from here
+  if (socket?.connected) {
+    return socket;
+  }
 
-export {socket, connectSocket};
+  socket = io(SOCKET_URL || undefined, {
+    query: { user_id },
+    transports: ["websocket", "polling"],
+  });
+  return socket;
+};
+
+const disconnectSocket = () => {
+  if (socket) {
+    socket.disconnect();
+    socket = undefined;
+  }
+};
+
+export { socket, connectSocket, disconnectSocket };

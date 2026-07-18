@@ -11,6 +11,7 @@ import {
 import { styled, useTheme } from "@mui/material/styles";
 import { Chat } from "phosphor-react";
 import { socket } from "../socket";
+import { getStorageFileUrl } from "../utils/fileUrl";
 
 const user_id = window.localStorage.getItem("user_id");
 
@@ -53,6 +54,7 @@ const UserElement = ({ img, firstName, lastName, online, _id }) => {
   const theme = useTheme();
 
   const name = `${firstName} ${lastName}`;
+  const avatarSrc = getStorageFileUrl(img);
 
   return (
     <StyledChatBox
@@ -78,10 +80,10 @@ const UserElement = ({ img, firstName, lastName, online, _id }) => {
               anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
               variant="dot"
             >
-              <Avatar alt={name} src={img} />
+              <Avatar alt={name} src={avatarSrc} />
             </StyledBadge>
           ) : (
-            <Avatar alt={name} src={img} />
+            <Avatar alt={name} src={avatarSrc} />
           )}
           <Stack spacing={0.3}>
             <Typography variant="subtitle2">{name}</Typography>
@@ -115,6 +117,7 @@ const FriendRequestElement = ({
   const theme = useTheme();
 
   const name = `${firstName} ${lastName}`;
+  const avatarSrc = getStorageFileUrl(img);
 
   return (
     <StyledChatBox
@@ -140,10 +143,10 @@ const FriendRequestElement = ({
               anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
               variant="dot"
             >
-              <Avatar alt={name} src={img} />
+              <Avatar alt={name} src={avatarSrc} />
             </StyledBadge>
           ) : (
-            <Avatar alt={name} src={img} />
+            <Avatar alt={name} src={avatarSrc} />
           )}
           <Stack spacing={0.3}>
             <Typography variant="subtitle2">{name}</Typography>
@@ -178,6 +181,7 @@ const FriendElement = ({
   const theme = useTheme();
 
   const name = `${firstName} ${lastName}`;
+  const avatarSrc = getStorageFileUrl(img);
 
   return (
     <StyledChatBox
@@ -203,10 +207,10 @@ const FriendElement = ({
               anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
               variant="dot"
             >
-              <Avatar alt={name} src={img} />
+              <Avatar alt={name} src={avatarSrc} />
             </StyledBadge>
           ) : (
-            <Avatar alt={name} src={img} />
+            <Avatar alt={name} src={avatarSrc} />
           )}
           <Stack spacing={0.3}>
             <Typography variant="subtitle2">{name}</Typography>

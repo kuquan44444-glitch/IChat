@@ -17,7 +17,7 @@ import {
 import { useDispatch } from "react-redux";
 import { StartAudioCall } from "../redux/slices/audioCall";
 import { StartVideoCall } from "../redux/slices/videoCall";
-import { AWS_S3_REGION, S3_BUCKET_NAME } from "../config";
+import { getStorageFileUrl } from "../utils/fileUrl";
 
 const StyledChatBox = styled(Box)(({ theme }) => ({
   "&:hover": {
@@ -56,6 +56,7 @@ const StyledBadge = styled(Badge)(({ theme }) => ({
 
 const CallLogElement = ({ img, name, incoming, missed, online, id }) => {
   const theme = useTheme();
+  const avatarSrc = getStorageFileUrl(img);
 
   return (
     <StyledChatBox
@@ -81,10 +82,10 @@ const CallLogElement = ({ img, name, incoming, missed, online, id }) => {
               anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
               variant="dot"
             >
-              <Avatar alt={name} src={`https://${S3_BUCKET_NAME}.s3.${AWS_S3_REGION}.amazonaws.com/${img}`} />
+              <Avatar alt={name} src={avatarSrc} />
             </StyledBadge>
           ) : (
-            <Avatar alt={name} src={`https://${S3_BUCKET_NAME}.s3.${AWS_S3_REGION}.amazonaws.com/${img}`} />
+            <Avatar alt={name} src={avatarSrc} />
           )}
           <Stack spacing={0.3}>
             <Typography variant="subtitle2">{name}</Typography>

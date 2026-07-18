@@ -13,7 +13,16 @@ const { promisify } = require("util");
 const catchAsync = require("../utils/catchAsync");
 
 // this function will return you jwt token
-const signToken = (userId) => jwt.sign({ userId }, process.env.JWT_SECRET);
+const signToken = (userId) =>
+  jwt.sign({ userId }, process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_EXPIRES_IN || "7d",
+  });
+
+const isEmailVerificationEnabled = () =>
+  `${process.env.ENABLE_EMAIL_VERIFICATION}`.toLowerCase() === "true";
+
+const getAppUrl = (req) =>
+  process.env.PUBLIC_APP_URL || `${req.protocol}://${req.get("host")}`;
 
 // Register New User
 
@@ -57,12 +66,45 @@ exports.register = catchAsync(async (req, res, next) => {
 
     // generate an otp and send to email
     req.userId = new_user._id;
-    next();
   }
+
+  if (!isEmailVerificationEnabled()) {
+    const user = await User.findByIdAndUpdate(
+      req.userId,
+      {
+        verified: true,
+        otp: undefined,
+        otp_expiry_time: undefined,
+      },
+      { new: true }
+    );
+
+    const token = signToken(user._id);
+
+    return res.status(201).json({
+      status: "success",
+      message: "Registered and logged in successfully!",
+      token,
+      user_id: user._id,
+    });
+  }
+
+  next();
 });
 
 exports.sendOTP = catchAsync(async (req, res, next) => {
   const { userId } = req;
+  const requestedEmail = req.body?.email;
+  const targetUserId =
+    userId || (requestedEmail ? (await User.findOne({ email: requestedEmail }))?._id : null);
+
+  if (!targetUserId) {
+    return res.status(400).json({
+      status: "error",
+      message: "User not found to send OTP",
+    });
+  }
+
   const new_otp = otpGenerator.generate(6, {
     upperCaseAlphabets: false,
     specialChars: false,
@@ -71,7 +113,7 @@ exports.sendOTP = catchAsync(async (req, res, next) => {
 
   const otp_expiry_time = Date.now() + 10 * 60 * 1000; // 10 Mins after otp is sent
 
-  const user = await User.findByIdAndUpdate(userId, {
+  const user = await User.findByIdAndUpdate(targetUserId, {
     otp_expiry_time: otp_expiry_time,
   });
 
@@ -79,16 +121,15 @@ exports.sendOTP = catchAsync(async (req, res, next) => {
 
   await user.save({ new: true, validateModifiedOnly: true });
 
-  console.log(new_otp);
-
-  // TODO send mail
-  mailService.sendEmail({
+  if (isEmailVerificationEnabled()) {
+    await mailService.sendEmail({
     from: "infogmk02@gmail.com",
     to: user.email,
     subject: "Verification OTP",
     html: otp(user.firstName, new_otp),
     attachments: [],
   });
+  }
 
   res.status(200).json({
     status: "success",
@@ -143,11 +184,8 @@ exports.verifyOTP = catchAsync(async (req, res, next) => {
   });
 });
 
-// User Login - Mock version for testing
 exports.login = catchAsync(async (req, res, next) => {
   const { email, password } = req.body;
-
-  console.log("Login attempt:", email, password);
 
   if (!email || !password) {
     res.status(400).json({
@@ -157,28 +195,33 @@ exports.login = catchAsync(async (req, res, next) => {
     return;
   }
 
-  // Mock authentication for testing
-  // Accept any email/password combination for now
-  const mockUser = {
-    _id: "mock_user_id_123",
-    email: email,
-    firstName: "Test",
-    lastName: "User"
-  };
+  const user = await User.findOne({ email }).select("+password");
 
-  const token = signToken(mockUser._id);
+  if (!user || !(await user.correctPassword(password, user.password))) {
+    return res.status(400).json({
+      status: "error",
+      message: "Incorrect email or password",
+    });
+  }
+
+  if (isEmailVerificationEnabled() && !user.verified) {
+    return res.status(403).json({
+      status: "error",
+      message: "Please verify your email before logging in",
+    });
+  }
+
+  const token = signToken(user._id);
 
   res.status(200).json({
     status: "success",
     message: "Logged in successfully!",
     token,
-    user_id: mockUser._id,
+    user_id: user._id,
   });
 });
 
-// Protect - Mock version for testing
 exports.protect = catchAsync(async (req, res, next) => {
-  // 1) Getting token and check if it's there
   let token;
   if (
     req.headers.authorization &&
@@ -195,21 +238,25 @@ exports.protect = catchAsync(async (req, res, next) => {
     });
   }
   
-  // 2) Verification of token
   const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
 
-  console.log("Token decoded:", decoded);
+  const currentUser = await User.findById(decoded.userId);
 
-  // Mock user for testing
-  const mockUser = {
-    _id: decoded.userId,
-    email: "test@example.com",
-    firstName: "Test",
-    lastName: "User"
-  };
+  if (!currentUser) {
+    return res.status(401).json({
+      status: "error",
+      message: "The user belonging to this token no longer exists",
+    });
+  }
 
-  // GRANT ACCESS TO PROTECTED ROUTE
-  req.user = mockUser;
+  if (currentUser.changedPasswordAfter(decoded.iat)) {
+    return res.status(401).json({
+      status: "error",
+      message: "User recently changed password. Please log in again.",
+    });
+  }
+
+  req.user = currentUser;
   next();
 });
 
@@ -229,12 +276,9 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
 
   // 3) Send it to user's email
   try {
-    const resetURL = `http://localhost:3000/auth/new-password?token=${resetToken}`;
-    // TODO => Send Email with this Reset URL to user's email address
+    const resetURL = `${getAppUrl(req)}/auth/new-password?token=${resetToken}`;
 
-    console.log(resetURL);
-
-    mailService.sendEmail({
+    await mailService.sendEmail({
       from: "infogmk02@gmail.com",
       to: user.email,
       subject: "Reset Password",
@@ -290,5 +334,6 @@ exports.resetPassword = catchAsync(async (req, res, next) => {
     status: "success",
     message: "Password Reseted Successfully",
     token,
+    user_id: user._id,
   });
 });

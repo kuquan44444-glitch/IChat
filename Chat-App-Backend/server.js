@@ -1,66 +1,84 @@
-const mongoose = require("mongoose");
-const jwt = require("jsonwebtoken");
-const dotenv = require("dotenv");
 const path = require("path");
-dotenv.config({ path: "./config.env" });
+const http = require("http");
+const dotenv = require("dotenv");
+const mongoose = require("mongoose");
+const { Server } = require("socket.io");
+
+dotenv.config({ path: path.resolve(__dirname, ".env") });
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 process.on("uncaughtException", (err) => {
-  console.log(err);
-  console.log("UNCAUGHT Exception! Shutting down ...");
-  process.exit(1); // Exit Code 1 indicates that a container shut down, either because of an application failure.
+  console.error("UNCAUGHT_EXCEPTION", err);
+  process.exit(1);
 });
 
 const app = require("./app");
-
-const http = require("http");
-const server = http.createServer(app);
-
-const { Server } = require("socket.io"); // Add this
-const { promisify } = require("util");
 const User = require("./models/user");
 const FriendRequest = require("./models/friendRequest");
 const OneToOneMessage = require("./models/OneToOneMessage");
 const AudioCall = require("./models/audioCall");
 const VideoCall = require("./models/videoCall");
 
-// Add this
-// Create an io server and allow for CORS from http://localhost:3000 with GET and POST methods
+const server = http.createServer(app);
+const allowedOrigins = (process.env.CORS_ORIGIN || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 const io = new Server(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"],
+    origin: allowedOrigins.length ? allowedOrigins : true,
+    methods: ["GET", "POST", "PATCH", "DELETE", "PUT"],
+    credentials: true,
   },
 });
 
-const DB = process.env.DATABASE;
+let isShuttingDown = false;
 
-// Temporarily disable MongoDB connection for testing
-// mongoose
-//   .connect(DB, {
-//     // useNewUrlParser: true, // The underlying MongoDB driver has deprecated their current connection string parser. Because this is a major change, they added the useNewUrlParser flag to allow users to fall back to the old parser if they find a bug in the new parser.
-//     // useCreateIndex: true, // Again previously MongoDB used an ensureIndex function call to ensure that Indexes exist and, if they didn't, to create one. This too was deprecated in favour of createIndex . the useCreateIndex option ensures that you are using the new function calls.
-//     // useFindAndModify: false, // findAndModify is deprecated. Use findOneAndUpdate, findOneAndReplace or findOneAndDelete instead.
-//     // useUnifiedTopology: true, // Set to true to opt in to using the MongoDB driver's new connection management engine. You should set this option to true , except for the unlikely case that it prevents you from maintaining a stable connection.
-//   })
-//   .then((con) => {
-//     console.log("DB Connection successful");
-//   })
-//   .catch((err) => {
-//     console.log("DB Connection failed:", err.message);
-//     console.log("Server will continue running without database connection");
-//   });
+const shutdown = async (signal, error) => {
+  if (isShuttingDown) {
+    return;
+  }
 
-console.log("MongoDB connection temporarily disabled for testing");
-console.log("Server will run without database - some features may not work");
+  isShuttingDown = true;
 
-const port = process.env.PORT || 8000;
+  if (error) {
+    console.error(`${signal}_ERROR`, error);
+  } else {
+    console.log(`${signal} received. Shutting down gracefully...`);
+  }
 
-server.listen(port, () => {
-  console.log(`App running on port ${port} ...`);
-});
+  server.close(async () => {
+    try {
+      await mongoose.connection.close(false);
+      process.exit(error ? 1 : 0);
+    } catch (closeError) {
+      console.error("SHUTDOWN_CLOSE_ERROR", closeError);
+      process.exit(1);
+    }
+  });
 
-// Add this
-// Listen for when the client connects via socket.io-client
+  setTimeout(() => {
+    console.error("Force closing server after shutdown timeout");
+    process.exit(1);
+  }, 10000).unref();
+};
+
+const startServer = async () => {
+  if (!process.env.DATABASE) {
+    throw new Error("DATABASE environment variable is required");
+  }
+
+  await mongoose.connect(process.env.DATABASE);
+  console.log("MongoDB connection successful");
+
+  const port = process.env.PORT || 3001;
+
+  server.listen(port, "0.0.0.0", () => {
+    console.log(`App running on port ${port} ...`);
+  });
+};
+
 io.on("connection", async (socket) => {
   console.log(JSON.stringify(socket.handshake.query));
   const user_id = socket.handshake.query["user_id"];
@@ -69,7 +87,7 @@ io.on("connection", async (socket) => {
 
   if (user_id != null && Boolean(user_id)) {
     try {
-      User.findByIdAndUpdate(user_id, {
+      await User.findByIdAndUpdate(user_id, {
         socket_id: socket.id,
         status: "Online",
       });
@@ -477,6 +495,17 @@ io.on("connection", async (socket) => {
 });
 
 process.on("unhandledRejection", (err) => {
-  console.log("Unhandled rejection:", err.message);
-  console.log("Server will continue running...");
+  shutdown("unhandledRejection", err);
+});
+
+process.on("SIGTERM", () => {
+  shutdown("SIGTERM");
+});
+
+process.on("SIGINT", () => {
+  shutdown("SIGINT");
+});
+
+startServer().catch((err) => {
+  shutdown("startupFailure", err);
 });

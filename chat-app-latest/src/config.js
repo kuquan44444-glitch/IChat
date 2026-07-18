@@ -4,12 +4,23 @@ import { enUS, frFR, zhCN, viVN, arSD } from '@mui/material/locale';
 // routes
 import { PATH_DASHBOARD } from "./routes/paths";
 
-export const BASE_URL = "http://localhost:3001";
+const getEnvValue = (key, fallback = "") => {
+  if (typeof process !== "undefined" && process.env[key]) {
+    return process.env[key];
+  }
 
-export const S3_BUCKET_NAME = 'your_s3_bucket_name';
-export const AWS_ACCESS_KEY = 'your_aws_access_key';
-export const AWS_SECRET_ACCESS_KEY = 'your_aws_secret_key';
-export const AWS_S3_REGION = 'your_aws_region'; // eg. ap-south-1
+  return fallback;
+};
+
+export const BASE_URL = getEnvValue("REACT_APP_API_BASE_URL", "");
+export const SOCKET_URL = getEnvValue(
+  "REACT_APP_SOCKET_URL",
+  BASE_URL || (typeof window !== "undefined" ? window.location.origin : "")
+);
+export const S3_BUCKET_NAME = getEnvValue("REACT_APP_S3_BUCKET_NAME", "");
+export const AWS_S3_REGION = getEnvValue("REACT_APP_S3_REGION", "");
+export const ZEGO_APP_ID = Number(getEnvValue("REACT_APP_ZEGO_APP_ID", "0"));
+export const ZEGO_SERVER = getEnvValue("REACT_APP_ZEGO_SERVER", "");
 
 export const defaultSettings = {
   themeMode: "light",

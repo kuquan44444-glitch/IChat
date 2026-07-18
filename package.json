@@ -1,0 +1,21 @@
+{
+  "name": "ichat-railway",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "chat-app-latest",
+    "Chat-App-Backend"
+  ],
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "scripts": {
+    "build": "npm run build --workspace chat",
+    "start": "npm run start --workspace chat-app-backend",
+    "start:backend": "npm run start --workspace chat-app-backend",
+    "build:frontend": "npm run build --workspace chat",
+    "dev:frontend": "npm run start --workspace chat",
+    "dev:backend": "npm run dev --workspace chat-app-backend"
+  }
+}

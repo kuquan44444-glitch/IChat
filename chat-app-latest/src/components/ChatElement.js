@@ -49,7 +49,7 @@ const ChatElement = ({ img, name, msg, time, unread, online, id }) => {
   const {room_id} = useSelector((state) => state.app);
   const selectedChatId = room_id?.toString();
 
-  let isSelected = +selectedChatId === id;
+  let isSelected = selectedChatId === id?.toString();
 
   if (!selectedChatId) {
     isSelected = false;

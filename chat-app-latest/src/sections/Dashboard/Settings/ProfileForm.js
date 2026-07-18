@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import * as Yup from "yup";
 // form
 import { useForm } from "react-hook-form";
@@ -9,7 +9,7 @@ import { Stack } from "@mui/material";
 import { LoadingButton } from "@mui/lab";
 import { useDispatch, useSelector } from "react-redux";
 import { UpdateUserProfile } from "../../../redux/slices/app";
-import { AWS_S3_REGION, S3_BUCKET_NAME } from "../../../config";
+import { getStorageFileUrl } from "../../../utils/fileUrl";
 
 const ProfileForm = () => {
   const dispatch = useDispatch();
@@ -19,13 +19,13 @@ const ProfileForm = () => {
   const ProfileSchema = Yup.object().shape({
     firstName: Yup.string().required("Name is required"),
     about: Yup.string().required("About is required"),
-    avatar: Yup.string().required("Avatar is required").nullable(true),
+    avatar: Yup.mixed().required("Avatar is required").nullable(true),
   });
 
   const defaultValues = {
     firstName: user?.firstName,
     about: user?.about,
-    avatar: `https://${S3_BUCKET_NAME}.s3.${AWS_S3_REGION}.amazonaws.com/${user?.avatar}`,
+    avatar: getStorageFileUrl(user?.avatar),
   };
 
   const methods = useForm({
@@ -43,6 +43,10 @@ const ProfileForm = () => {
   } = methods;
 
   const values = watch();
+
+  useEffect(() => {
+    reset(defaultValues);
+  }, [user, reset]);
 
   const onSubmit = async (data) => {
     try {

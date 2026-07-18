@@ -5,13 +5,16 @@ import { showSnackbar } from "./app";
 
 // ----------------------------------------------------------------------
 
+const getStoredValue = (key, fallback = "") =>
+  window.localStorage.getItem(key) || fallback;
+
 const initialState = {
-  isLoggedIn: true, // Skip authentication - set to true by default
-  token: "mock_token_123",
+  isLoggedIn: Boolean(getStoredValue("token")),
+  token: getStoredValue("token"),
   isLoading: false,
   user: null,
-  user_id: "mock_user_id_123",
-  email: "test@example.com",
+  user_id: getStoredValue("user_id", null),
+  email: "",
   error: false,
 };
 
@@ -32,6 +35,7 @@ const slice = createSlice({
       state.isLoggedIn = false;
       state.token = "";
       state.user_id = null;
+      state.email = "";
     },
     updateRegisterEmail(state, action) {
       state.email = action.payload.email;
@@ -64,8 +68,13 @@ export function NewPassword(formValues) {
             slice.actions.logIn({
               isLoggedIn: true,
               token: response.data.token,
+              user_id: response.data.user_id,
             })
           );
+        window.localStorage.setItem("token", response.data.token);
+        if (response.data.user_id) {
+          window.localStorage.setItem("user_id", response.data.user_id);
+        }
         dispatch(
           showSnackbar({ severity: "success", message: response.data.message })
         );
@@ -146,6 +155,7 @@ export function LoginUser(formValues) {
             user_id: response.data.user_id,
           })
         );
+        window.localStorage.setItem("token", response.data.token);
         window.localStorage.setItem("user_id", response.data.user_id);
         dispatch(
           showSnackbar({ severity: "success", message: response.data.message })
@@ -167,6 +177,7 @@ export function LoginUser(formValues) {
 export function LogoutUser() {
   return async (dispatch, getState) => {
     window.localStorage.removeItem("user_id");
+    window.localStorage.removeItem("token");
     dispatch(slice.actions.signOut());
   };
 }
@@ -189,9 +200,23 @@ export function RegisterUser(formValues) {
       )
       .then(function (response) {
         console.log(response);
-        dispatch(
-          slice.actions.updateRegisterEmail({ email: formValues.email })
-        );
+        const { token, user_id } = response.data;
+
+        if (token && user_id) {
+          dispatch(
+            slice.actions.logIn({
+              isLoggedIn: true,
+              token,
+              user_id,
+            })
+          );
+          window.localStorage.setItem("token", token);
+          window.localStorage.setItem("user_id", user_id);
+        } else {
+          dispatch(
+            slice.actions.updateRegisterEmail({ email: formValues.email })
+          );
+        }
 
         dispatch(
           showSnackbar({ severity: "success", message: response.data.message })
@@ -209,7 +234,11 @@ export function RegisterUser(formValues) {
       })
       .finally(() => {
         if (!getState().auth.error) {
-          window.location.href = "/auth/verify";
+          if (getState().auth.isLoggedIn) {
+            window.location.href = "/app";
+          } else {
+            window.location.href = "/auth/verify";
+          }
         }
       });
   };
@@ -235,10 +264,12 @@ export function VerifyEmail(formValues) {
         console.log(response);
         dispatch(slice.actions.updateRegisterEmail({ email: "" }));
         window.localStorage.setItem("user_id", response.data.user_id);
+        window.localStorage.setItem("token", response.data.token);
         dispatch(
           slice.actions.logIn({
             isLoggedIn: true,
             token: response.data.token,
+            user_id: response.data.user_id,
           })
         );
 

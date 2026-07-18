@@ -16,7 +16,7 @@ import { CallElement } from "../../components/CallElement";
 import { CallList } from "../../data";
 import { useDispatch, useSelector } from "react-redux";
 import { FetchAllUsers } from "../../redux/slices/app";
-import {faker} from "@faker-js/faker";
+import { getStorageFileUrl } from "../../utils/fileUrl";
 
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
@@ -34,7 +34,7 @@ const StartCall = ({ open, handleClose }) => {
   const list = all_users.map((el) => ({
     id: el?._id,
     name: `${el?.firstName} ${el?.lastName}`,
-    image: faker.image.avatar(),
+    img: getStorageFileUrl(el?.avatar),
   }));
 
   return (
