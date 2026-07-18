@@ -4,12 +4,23 @@ import { enUS, frFR, zhCN, viVN, arSD } from '@mui/material/locale';
 // routes
 import { PATH_DASHBOARD } from "./routes/paths";
 
-export const BASE_URL = "http://localhost:3001";
+const removeTrailingSlash = (value = "") => value.replace(/\/$/, "");
+const browserOrigin =
+  typeof window !== "undefined" ? window.location.origin : "";
 
-export const S3_BUCKET_NAME = 'your_s3_bucket_name';
-export const AWS_ACCESS_KEY = 'your_aws_access_key';
-export const AWS_SECRET_ACCESS_KEY = 'your_aws_secret_key';
-export const AWS_S3_REGION = 'your_aws_region'; // eg. ap-south-1
+export const BASE_URL = removeTrailingSlash(
+  process.env.REACT_APP_API_BASE_URL || browserOrigin
+);
+export const SOCKET_URL = removeTrailingSlash(
+  process.env.REACT_APP_SOCKET_URL || browserOrigin
+);
+export const ZEGO_APP_ID = Number(process.env.REACT_APP_ZEGO_APP_ID || 0);
+export const ZEGO_SERVER =
+  process.env.REACT_APP_ZEGO_SERVER ||
+  (ZEGO_APP_ID ? `wss://webliveroom${ZEGO_APP_ID}-api.coolzcloud.com/ws` : "");
+
+export const S3_BUCKET_NAME = process.env.REACT_APP_AWS_S3_BUCKET_NAME || "";
+export const AWS_S3_REGION = process.env.REACT_APP_AWS_S3_REGION || "";
 
 export const defaultSettings = {
   themeMode: "light",

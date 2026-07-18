@@ -1,28 +1,32 @@
 import { createSlice } from "@reduxjs/toolkit";
 import axios from "../../utils/axios";
-// import S3 from "../../utils/s3";
-import {v4} from 'uuid';
-import S3 from "../../utils/s3";
-import { S3_BUCKET_NAME } from "../../config";
-// ----------------------------------------------------------------------
+import uuidv4 from "../../utils/uuidv4";
+
+const getErrorMessage = (error) => error?.message || error || "Something went wrong";
+const getAuthConfig = (token) => ({
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  },
+});
 
 const initialState = {
   user: {},
   sideBar: {
     open: false,
-    type: "CONTACT", // can be CONTACT, STARRED, SHARED
+    type: "CONTACT",
   },
-  isLoggedIn: true,
-  tab: 0, // [0, 1, 2, 3]
+  isLoggedIn: false,
+  tab: 0,
   snackbar: {
     open: null,
     severity: null,
     message: null,
   },
-  users: [], // all users of app who are not friends and not requested yet
+  users: [],
   all_users: [],
-  friends: [], // all friends
-  friendRequests: [], // all friend requests
+  friends: [],
+  friendRequests: [],
   chat_type: null,
   room_id: null,
   call_logs: [],
@@ -41,7 +45,6 @@ const slice = createSlice({
     updateUser(state, action) {
       state.user = action.payload.user;
     },
-    // Toggle Sidebar
     toggleSideBar(state) {
       state.sideBar.open = !state.sideBar.open;
     },
@@ -51,15 +54,12 @@ const slice = createSlice({
     updateTab(state, action) {
       state.tab = action.payload.tab;
     },
-
     openSnackBar(state, action) {
-      console.log(action.payload);
       state.snackbar.open = true;
       state.snackbar.severity = action.payload.severity;
       state.snackbar.message = action.payload.message;
     },
     closeSnackBar(state) {
-      console.log("This is getting executed");
       state.snackbar.open = false;
       state.snackbar.message = null;
     },
@@ -82,18 +82,15 @@ const slice = createSlice({
   },
 });
 
-// Reducer
 export default slice.reducer;
 
-// ----------------------------------------------------------------------
-
-export const closeSnackBar = () => async (dispatch, getState) => {
+export const closeSnackBar = () => async (dispatch) => {
   dispatch(slice.actions.closeSnackBar());
 };
 
 export const showSnackbar =
   ({ severity, message }) =>
-  async (dispatch, getState) => {
+  async (dispatch) => {
     dispatch(
       slice.actions.openSnackBar({
         message,
@@ -107,212 +104,156 @@ export const showSnackbar =
   };
 
 export function ToggleSidebar() {
-  return async (dispatch, getState) => {
+  return async (dispatch) => {
     dispatch(slice.actions.toggleSideBar());
   };
 }
+
 export function UpdateSidebarType(type) {
-  return async (dispatch, getState) => {
+  return async (dispatch) => {
     dispatch(slice.actions.updateSideBarType({ type }));
   };
 }
+
 export function UpdateTab(tab) {
-  return async (dispatch, getState) => {
+  return async (dispatch) => {
     dispatch(slice.actions.updateTab(tab));
   };
 }
 
 export function FetchUsers() {
   return async (dispatch, getState) => {
-    // Mock users data for testing
-    const mockUsers = [
-      {
-        _id: "user1",
-        firstName: "John",
-        lastName: "Doe"
-      },
-      {
-        _id: "user2", 
-        firstName: "Jane",
-        lastName: "Smith"
-      },
-      {
-        _id: "user3",
-        firstName: "Bob",
-        lastName: "Johnson"
-      }
-    ];
-    
-    dispatch(slice.actions.updateUsers({ users: mockUsers }));
+    try {
+      const response = await axios.get(
+        "/user/get-users",
+        getAuthConfig(getState().auth.token)
+      );
+      dispatch(slice.actions.updateUsers({ users: response.data.data || [] }));
+    } catch (error) {
+      dispatch(showSnackbar({ severity: "error", message: getErrorMessage(error) }));
+    }
   };
 }
+
 export function FetchAllUsers() {
   return async (dispatch, getState) => {
-    // Mock users data for testing
-    const mockUsers = [
-      {
-        _id: "user1",
-        firstName: "John",
-        lastName: "Doe"
-      },
-      {
-        _id: "user2", 
-        firstName: "Jane",
-        lastName: "Smith"
-      },
-      {
-        _id: "user3",
-        firstName: "Bob",
-        lastName: "Johnson"
-      }
-    ];
-    
-    dispatch(slice.actions.updateAllUsers({ users: mockUsers }));
+    try {
+      const response = await axios.get(
+        "/user/get-all-verified-users",
+        getAuthConfig(getState().auth.token)
+      );
+      dispatch(slice.actions.updateAllUsers({ users: response.data.data || [] }));
+    } catch (error) {
+      dispatch(showSnackbar({ severity: "error", message: getErrorMessage(error) }));
+    }
   };
 }
+
 export function FetchFriends() {
   return async (dispatch, getState) => {
-    // Mock friends data for testing
-    const mockFriends = [
-      {
-        _id: "friend1",
-        firstName: "Alice",
-        lastName: "Wonder"
-      },
-      {
-        _id: "friend2",
-        firstName: "Charlie",
-        lastName: "Brown"
-      }
-    ];
-    
-    dispatch(slice.actions.updateFriends({ friends: mockFriends }));
+    try {
+      const response = await axios.get(
+        "/user/get-friends",
+        getAuthConfig(getState().auth.token)
+      );
+      dispatch(slice.actions.updateFriends({ friends: response.data.data || [] }));
+    } catch (error) {
+      dispatch(showSnackbar({ severity: "error", message: getErrorMessage(error) }));
+    }
   };
 }
+
 export function FetchFriendRequests() {
   return async (dispatch, getState) => {
-    // Mock friend requests data for testing
-    const mockRequests = [
-      {
-        _id: "request1",
-        firstName: "David",
-        lastName: "Wilson"
-      }
-    ];
-    
-    dispatch(slice.actions.updateFriendRequests({ requests: mockRequests }));
+    try {
+      const response = await axios.get(
+        "/user/get-requests",
+        getAuthConfig(getState().auth.token)
+      );
+      dispatch(
+        slice.actions.updateFriendRequests({ requests: response.data.data || [] })
+      );
+    } catch (error) {
+      dispatch(showSnackbar({ severity: "error", message: getErrorMessage(error) }));
+    }
   };
 }
 
 export const SelectConversation = ({ room_id }) => {
-  return async (dispatch, getState) => {
+  return async (dispatch) => {
     dispatch(slice.actions.selectConversation({ room_id }));
   };
 };
 
 export const FetchCallLogs = () => {
   return async (dispatch, getState) => {
-    axios
-      .get("/user/get-call-logs", {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getState().auth.token}`,
-        },
-      })
-      .then((response) => {
-        console.log(response);
-        dispatch(slice.actions.fetchCallLogs({ call_logs: response.data.data }));
-      })
-      .catch((err) => {
-        console.log(err);
-      });
+    try {
+      const response = await axios.get(
+        "/user/get-call-logs",
+        getAuthConfig(getState().auth.token)
+      );
+      dispatch(slice.actions.fetchCallLogs({ call_logs: response.data.data || [] }));
+    } catch (error) {
+      dispatch(showSnackbar({ severity: "error", message: getErrorMessage(error) }));
+    }
   };
 };
+
 export const FetchUserProfile = () => {
   return async (dispatch, getState) => {
-    // Mock user data for testing without authentication
-    const mockUser = {
-      _id: "mock_user_id_123",
-      firstName: "Test",
-      lastName: "User",
-      email: "test@example.com",
-      avatar: "https://via.placeholder.com/150",
-      about: "Test user for development",
-      verified: true,
-      friends: []
-    };
-    
-    dispatch(slice.actions.fetchUser({ user: mockUser }));
-    
-    // Also fetch mock users
-    const mockUsers = [
-      {
-        _id: "user1",
-        firstName: "John",
-        lastName: "Doe"
-      },
-      {
-        _id: "user2", 
-        firstName: "Jane",
-        lastName: "Smith"
-      },
-      {
-        _id: "user3",
-        firstName: "Bob",
-        lastName: "Johnson"
-      }
-    ];
-    
-    dispatch(slice.actions.updateUsers({ users: mockUsers }));
-    dispatch(slice.actions.updateAllUsers({ users: mockUsers }));
+    try {
+      const response = await axios.get(
+        "/user/get-me",
+        getAuthConfig(getState().auth.token)
+      );
+      dispatch(slice.actions.fetchUser({ user: response.data.data || {} }));
+    } catch (error) {
+      dispatch(showSnackbar({ severity: "error", message: getErrorMessage(error) }));
+    }
   };
 };
+
 export const UpdateUserProfile = (formValues) => {
   return async (dispatch, getState) => {
-    const file = formValues.avatar;
+    try {
+      const token = getState().auth.token;
+      const payload = {
+        firstName: formValues.firstName,
+        about: formValues.about,
+      };
 
-    const key = v4();
-
-    try{
-      S3.getSignedUrl(
-        "putObject",
-        { Bucket: S3_BUCKET_NAME, Key: key, ContentType: `image/${file.type}` },
-        async (_err, presignedURL) => {
-          await fetch(presignedURL, {
-            method: "PUT",
-  
-            body: file,
-  
-            headers: {
-              "Content-Type": file.type,
-            },
-          });
-        }
-      );
-    }
-    catch(error) {
-      console.log(error);
-    }
-
-    
-
-    axios
-      .patch(
-        "/user/update-me",
-        { ...formValues, avatar: key },
-        {
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${getState().auth.token}`,
+      if (formValues.avatar instanceof File) {
+        const key = `avatars/${uuidv4()}`;
+        const uploadResponse = await axios.post(
+          "/user/avatar-upload-url",
+          {
+            key,
+            contentType: formValues.avatar.type,
           },
-        }
-      )
-      .then((response) => {
-        console.log(response);
-        dispatch(slice.actions.updateUser({ user: response.data.data }));
-      })
-      .catch((err) => {
-        console.log(err);
-      });
+          getAuthConfig(token)
+        );
+
+        await fetch(uploadResponse.data.data.uploadUrl, {
+          method: "PUT",
+          body: formValues.avatar,
+          headers: {
+            "Content-Type": formValues.avatar.type,
+          },
+        });
+
+        payload.avatar = key;
+      }
+
+      const response = await axios.patch(
+        "/user/update-me",
+        payload,
+        getAuthConfig(token)
+      );
+
+      dispatch(slice.actions.updateUser({ user: response.data.data }));
+      dispatch(showSnackbar({ severity: "success", message: response.data.message }));
+    } catch (error) {
+      dispatch(showSnackbar({ severity: "error", message: getErrorMessage(error) }));
+    }
   };
 };

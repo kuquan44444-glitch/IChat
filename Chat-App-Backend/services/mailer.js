@@ -1,7 +1,5 @@
 const sgMail = require("@sendgrid/mail");
 
-sgMail.setApiKey(process.env.SG_KEY);
-
 const sendSGMail = async ({
   to,
   sender,
@@ -11,7 +9,7 @@ const sendSGMail = async ({
   text,
 }) => {
   try {
-    const from = "infogmk01@gmail.com";
+    const from = sender || process.env.EMAIL_FROM || "infogmk01@gmail.com";
 
     const msg = {
       to: to, // Change to your recipient
@@ -30,9 +28,10 @@ const sendSGMail = async ({
 };
 
 exports.sendEmail = async (args) => {
-  if (!process.env.NODE_ENV === "development") {
+  if (!process.env.SG_KEY) {
     return Promise.resolve();
-  } else {
-    return sendSGMail(args);
   }
+
+  sgMail.setApiKey(process.env.SG_KEY);
+  return sendSGMail(args);
 };

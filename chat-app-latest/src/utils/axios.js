@@ -4,7 +4,7 @@ import { BASE_URL } from '../config';
 
 // ----------------------------------------------------------------------
 
-const axiosInstance = axios.create({ baseURL: BASE_URL });
+const axiosInstance = axios.create({ baseURL: BASE_URL || "/" });
 
 axiosInstance.interceptors.response.use(
   (response) => response,

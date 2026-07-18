@@ -1,0 +1,16 @@
+{
+  "name": "ichat-monorepo",
+  "private": true,
+  "workspaces": [
+    "Chat-App-Backend",
+    "chat-app-latest"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace chat",
+    "start": "node Chat-App-Backend/server.js",
+    "start:backend": "node Chat-App-Backend/server.js",
+    "start:frontend": "npm run start --workspace chat",
+    "dev:backend": "npm run dev --workspace chat-app-backend",
+    "dev:frontend": "npm run start --workspace chat"
+  }
+}
