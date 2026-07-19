@@ -16,21 +16,13 @@ const appID = process.env.ZEGO_APP_ID; // type: number
 const serverSecret = process.env.ZEGO_SERVER_SECRET; // type: 32 byte length string
 
 exports.getMe = catchAsync(async (req, res, next) => {
-  // Mock user data for testing
-  const mockUser = {
-    _id: req.user._id,
-    firstName: "Test",
-    lastName: "User",
-    email: "test@example.com",
-    avatar: "https://via.placeholder.com/150",
-    about: "Test user for development",
-    verified: true,
-    friends: []
-  };
+  const user = await User.findById(req.user._id)
+    .select("_id firstName lastName email avatar about verified friends status")
+    .populate("friends", "_id firstName lastName avatar about status");
 
   res.status(200).json({
     status: "success",
-    data: mockUser,
+    data: user,
   });
 });
 
@@ -43,7 +35,10 @@ exports.updateMe = catchAsync(async (req, res, next) => {
     "avatar"
   );
 
-  const userDoc = await User.findByIdAndUpdate(req.user._id, filteredBody);
+  const userDoc = await User.findByIdAndUpdate(req.user._id, filteredBody, {
+    new: true,
+    runValidators: true,
+  });
 
   res.status(200).json({
     status: "success",
@@ -53,28 +48,28 @@ exports.updateMe = catchAsync(async (req, res, next) => {
 });
 
 exports.getUsers = catchAsync(async (req, res, next) => {
-  // Mock users data for testing
-  const mockUsers = [
-    {
-      _id: "user1",
-      firstName: "John",
-      lastName: "Doe"
-    },
-    {
-      _id: "user2", 
-      firstName: "Jane",
-      lastName: "Smith"
-    },
-    {
-      _id: "user3",
-      firstName: "Bob",
-      lastName: "Johnson"
-    }
-  ];
+  const pendingRequests = await FriendRequest.find({
+    $or: [{ sender: req.user._id }, { recipient: req.user._id }],
+  }).select("sender recipient");
+
+  const excludedUserIds = new Set([
+    req.user._id.toString(),
+    ...req.user.friends.map((friendId) => friendId.toString()),
+  ]);
+
+  pendingRequests.forEach((request) => {
+    excludedUserIds.add(request.sender.toString());
+    excludedUserIds.add(request.recipient.toString());
+  });
+
+  const users = await User.find({
+    verified: true,
+    _id: { $nin: Array.from(excludedUserIds) },
+  }).select("_id firstName lastName avatar about status");
 
   res.status(200).json({
     status: "success",
-    data: mockUsers,
+    data: users,
     message: "Users found successfully!",
   });
 });
@@ -82,7 +77,7 @@ exports.getUsers = catchAsync(async (req, res, next) => {
 exports.getAllVerifiedUsers = catchAsync(async (req, res, next) => {
   const all_users = await User.find({
     verified: true,
-  }).select("firstName lastName _id");
+  }).select("_id firstName lastName avatar about status");
 
   const remaining_users = all_users.filter(
     (user) => user._id.toString() !== req.user._id.toString()
@@ -97,8 +92,7 @@ exports.getAllVerifiedUsers = catchAsync(async (req, res, next) => {
 
 exports.getRequests = catchAsync(async (req, res, next) => {
   const requests = await FriendRequest.find({ recipient: req.user._id })
-    .populate("sender")
-    .select("_id firstName lastName");
+    .populate("sender", "_id firstName lastName avatar about status");
 
   res.status(200).json({
     status: "success",
@@ -110,7 +104,7 @@ exports.getRequests = catchAsync(async (req, res, next) => {
 exports.getFriends = catchAsync(async (req, res, next) => {
   const this_user = await User.findById(req.user._id).populate(
     "friends",
-    "_id firstName lastName"
+    "_id firstName lastName avatar about status"
   );
   res.status(200).json({
     status: "success",
@@ -244,13 +238,13 @@ exports.getCallLogs = catchAsync(async (req, res, next) => {
       // incoming
       const other_user = elm.from;
 
-      // outgoing
+      // incoming
       call_logs.push({
         id: elm._id,
         img: other_user.avatar,
         name: other_user.firstName,
         online: true,
-        incoming: false,
+        incoming: true,
         missed,
       });
     }
@@ -274,13 +268,13 @@ exports.getCallLogs = catchAsync(async (req, res, next) => {
       // incoming
       const other_user = element.from;
 
-      // outgoing
+      // incoming
       call_logs.push({
         id: element._id,
         img: other_user.avatar,
         name: other_user.firstName,
         online: true,
-        incoming: false,
+        incoming: true,
         missed,
       });
     }

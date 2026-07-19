@@ -5,7 +5,6 @@ import { SimpleBarStyle } from "../../components/Scrollbar";
 
 import { ChatHeader, ChatFooter } from "../../components/Chat";
 import useResponsive from "../../hooks/useResponsive";
-import { Chat_History } from "../../data";
 import {
   DocMsg,
   LinkMsg,
@@ -31,15 +30,17 @@ const Conversation = ({ isMobile, menu }) => {
 
   useEffect(() => {
     const current = conversations.find((el) => el?.id === room_id);
+    dispatch(SetCurrentConversation(current || null));
 
-    socket.emit("get_messages", { conversation_id: current?.id }, (data) => {
-      // data => list of messages
-      console.log(data, "List of messages");
-      dispatch(FetchCurrentMessages({ messages: data }));
+    if (!current?.id) {
+      dispatch(FetchCurrentMessages({ messages: [] }));
+      return;
+    }
+
+    socket.emit("get_messages", { conversation_id: current.id }, (data) => {
+      dispatch(FetchCurrentMessages({ messages: data || [] }));
     });
-
-    dispatch(SetCurrentConversation(current));
-  }, []);
+  }, [conversations, dispatch, room_id]);
   return (
     <Box p={isMobile ? 1 : 3}>
       <Stack spacing={3}>
@@ -104,14 +105,17 @@ const ChatComponent = () => {
 
   useEffect(() => {
     // Scroll to the bottom of the message list when new messages are added
-    messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
+    if (messageListRef.current) {
+      messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
+    }
   }, [current_messages]);
 
   return (
     <Stack
       height={"100%"}
-      maxHeight={"100vh"}
-      width={isMobile ? "100vw" : "auto"}
+      maxHeight={"100dvh"}
+      width={"100%"}
+      minWidth={0}
     >
       {/*  */}
       <ChatHeader />
@@ -121,7 +125,8 @@ const ChatComponent = () => {
         sx={{
           position: "relative",
           flexGrow: 1,
-          overflow: "scroll",
+          overflow: "auto",
+          minHeight: 0,
 
           backgroundColor:
             theme.palette.mode === "light"

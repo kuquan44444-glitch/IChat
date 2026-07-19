@@ -37,9 +37,10 @@ const DashboardLayout = () => {
   );
 
   useEffect(() => {
-    dispatch(FetchUserProfile());
-  }, []);
-  
+    if (isLoggedIn) {
+      dispatch(FetchUserProfile());
+    }
+  }, [dispatch, isLoggedIn]);
 
   const handleCloseAudioDialog = () => {
     dispatch(UpdateAudioCallDialog({ state: false }));
@@ -49,27 +50,16 @@ const DashboardLayout = () => {
   };
 
   useEffect(() => {
-    if (isLoggedIn) {
-      window.onload = function () {
-        if (!window.location.hash) {
-          window.location = window.location + "#loaded";
-          window.location.reload();
-        }
-      };
-
-      window.onload();
-
+    if (isLoggedIn && user_id) {
       if (!socket) {
         connectSocket(user_id);
       }
 
       socket.on("audio_call_notification", (data) => {
-        // TODO => dispatch an action to add this in call_queue
         dispatch(PushToAudioCallQueue(data));
       });
       
       socket.on("video_call_notification", (data) => {
-        // TODO => dispatch an action to add this in call_queue
         dispatch(PushToVideoCallQueue(data));
       });
 
@@ -138,8 +128,9 @@ const DashboardLayout = () => {
       socket?.off("start_chat");
       socket?.off("new_message");
       socket?.off("audio_call_notification");
+      socket?.off("video_call_notification");
     };
-  }, [isLoggedIn, socket]);
+  }, [current_conversation?.id, conversations, dispatch, isLoggedIn, user_id]);
 
   if (!isLoggedIn) {
     return <Navigate to={"/auth/login"} />;

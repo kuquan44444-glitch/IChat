@@ -1,7 +1,6 @@
 import { createSlice } from "@reduxjs/toolkit";
 import axios from "../../utils/axios";
-// import S3 from "../../utils/s3";
-import {v4} from 'uuid';
+import { v4 } from "uuid";
 import S3 from "../../utils/s3";
 import { S3_BUCKET_NAME } from "../../config";
 // ----------------------------------------------------------------------
@@ -124,83 +123,68 @@ export function UpdateTab(tab) {
 
 export function FetchUsers() {
   return async (dispatch, getState) => {
-    // Mock users data for testing
-    const mockUsers = [
-      {
-        _id: "user1",
-        firstName: "John",
-        lastName: "Doe"
-      },
-      {
-        _id: "user2", 
-        firstName: "Jane",
-        lastName: "Smith"
-      },
-      {
-        _id: "user3",
-        firstName: "Bob",
-        lastName: "Johnson"
-      }
-    ];
-    
-    dispatch(slice.actions.updateUsers({ users: mockUsers }));
+    try {
+      const response = await axios.get("/user/get-users", {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getState().auth.token}`,
+        },
+      });
+
+      dispatch(slice.actions.updateUsers({ users: response.data.data || [] }));
+    } catch (error) {
+      console.log(error);
+    }
   };
 }
 export function FetchAllUsers() {
   return async (dispatch, getState) => {
-    // Mock users data for testing
-    const mockUsers = [
-      {
-        _id: "user1",
-        firstName: "John",
-        lastName: "Doe"
-      },
-      {
-        _id: "user2", 
-        firstName: "Jane",
-        lastName: "Smith"
-      },
-      {
-        _id: "user3",
-        firstName: "Bob",
-        lastName: "Johnson"
-      }
-    ];
-    
-    dispatch(slice.actions.updateAllUsers({ users: mockUsers }));
+    try {
+      const response = await axios.get("/user/get-all-verified-users", {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getState().auth.token}`,
+        },
+      });
+
+      dispatch(slice.actions.updateAllUsers({ users: response.data.data || [] }));
+    } catch (error) {
+      console.log(error);
+    }
   };
 }
 export function FetchFriends() {
   return async (dispatch, getState) => {
-    // Mock friends data for testing
-    const mockFriends = [
-      {
-        _id: "friend1",
-        firstName: "Alice",
-        lastName: "Wonder"
-      },
-      {
-        _id: "friend2",
-        firstName: "Charlie",
-        lastName: "Brown"
-      }
-    ];
-    
-    dispatch(slice.actions.updateFriends({ friends: mockFriends }));
+    try {
+      const response = await axios.get("/user/get-friends", {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getState().auth.token}`,
+        },
+      });
+
+      dispatch(slice.actions.updateFriends({ friends: response.data.data || [] }));
+    } catch (error) {
+      console.log(error);
+    }
   };
 }
 export function FetchFriendRequests() {
   return async (dispatch, getState) => {
-    // Mock friend requests data for testing
-    const mockRequests = [
-      {
-        _id: "request1",
-        firstName: "David",
-        lastName: "Wilson"
-      }
-    ];
-    
-    dispatch(slice.actions.updateFriendRequests({ requests: mockRequests }));
+    try {
+      const response = await axios.get("/user/get-requests", {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getState().auth.token}`,
+        },
+      });
+
+      dispatch(
+        slice.actions.updateFriendRequests({ requests: response.data.data || [] })
+      );
+    } catch (error) {
+      console.log(error);
+    }
   };
 }
 
@@ -230,89 +214,74 @@ export const FetchCallLogs = () => {
 };
 export const FetchUserProfile = () => {
   return async (dispatch, getState) => {
-    // Mock user data for testing without authentication
-    const mockUser = {
-      _id: "mock_user_id_123",
-      firstName: "Test",
-      lastName: "User",
-      email: "test@example.com",
-      avatar: "https://via.placeholder.com/150",
-      about: "Test user for development",
-      verified: true,
-      friends: []
-    };
-    
-    dispatch(slice.actions.fetchUser({ user: mockUser }));
-    
-    // Also fetch mock users
-    const mockUsers = [
-      {
-        _id: "user1",
-        firstName: "John",
-        lastName: "Doe"
-      },
-      {
-        _id: "user2", 
-        firstName: "Jane",
-        lastName: "Smith"
-      },
-      {
-        _id: "user3",
-        firstName: "Bob",
-        lastName: "Johnson"
-      }
-    ];
-    
-    dispatch(slice.actions.updateUsers({ users: mockUsers }));
-    dispatch(slice.actions.updateAllUsers({ users: mockUsers }));
+    try {
+      const response = await axios.get("/user/get-me", {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getState().auth.token}`,
+        },
+      });
+
+      dispatch(slice.actions.fetchUser({ user: response.data.data || {} }));
+    } catch (error) {
+      console.log(error);
+    }
   };
 };
 export const UpdateUserProfile = (formValues) => {
   return async (dispatch, getState) => {
+    const currentAvatar = getState().app.user?.avatar || "";
     const file = formValues.avatar;
+    let avatarKey = currentAvatar;
 
-    const key = v4();
+    if (file && typeof file !== "string" && file.type) {
+      const key = v4();
 
-    try{
-      S3.getSignedUrl(
-        "putObject",
-        { Bucket: S3_BUCKET_NAME, Key: key, ContentType: `image/${file.type}` },
-        async (_err, presignedURL) => {
-          await fetch(presignedURL, {
-            method: "PUT",
-  
-            body: file,
-  
-            headers: {
-              "Content-Type": file.type,
-            },
-          });
-        }
-      );
+      try {
+        const presignedURL = await new Promise((resolve, reject) => {
+          S3.getSignedUrl(
+            "putObject",
+            { Bucket: S3_BUCKET_NAME, Key: key, ContentType: file.type },
+            (error, url) => {
+              if (error) {
+                reject(error);
+                return;
+              }
+
+              resolve(url);
+            }
+          );
+        });
+
+        await fetch(presignedURL, {
+          method: "PUT",
+          body: file,
+          headers: {
+            "Content-Type": file.type,
+          },
+        });
+
+        avatarKey = key;
+      } catch (error) {
+        console.log(error);
+      }
     }
-    catch(error) {
-      console.log(error);
-    }
 
-    
-
-    axios
-      .patch(
+    try {
+      const response = await axios.patch(
         "/user/update-me",
-        { ...formValues, avatar: key },
+        { ...formValues, avatar: avatarKey },
         {
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${getState().auth.token}`,
           },
         }
-      )
-      .then((response) => {
-        console.log(response);
-        dispatch(slice.actions.updateUser({ user: response.data.data }));
-      })
-      .catch((err) => {
-        console.log(err);
-      });
+      );
+
+      dispatch(slice.actions.updateUser({ user: response.data.data }));
+    } catch (error) {
+      console.log(error);
+    }
   };
 };

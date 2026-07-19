@@ -1,5 +1,4 @@
 import { createSlice } from "@reduxjs/toolkit";
-import { faker } from "@faker-js/faker";
 import { AWS_S3_REGION, S3_BUCKET_NAME } from "../../config";
 
 const user_id = window.localStorage.getItem("user_id");
@@ -13,30 +12,64 @@ const initialState = {
   group_chat: {},
 };
 
+const buildS3Url = (fileKey) => {
+  if (!fileKey) {
+    return "";
+  }
+
+  if (fileKey.startsWith("http://") || fileKey.startsWith("https://")) {
+    return fileKey;
+  }
+
+  return `https://${S3_BUCKET_NAME}.s3.${AWS_S3_REGION}.amazonaws.com/${fileKey}`;
+};
+
+const formatConversation = (conversation) => {
+  const user = conversation.participants.find(
+    (participant) => participant._id.toString() !== user_id
+  );
+  const lastMessage = conversation.messages?.slice(-1)[0];
+
+  return {
+    id: conversation._id,
+    user_id: user?._id,
+    name: `${user?.firstName || ""} ${user?.lastName || ""}`.trim(),
+    online: user?.status === "Online",
+    img: buildS3Url(user?.avatar),
+    msg: lastMessage?.text || "Start chatting",
+    time: "9:36",
+    unread: 0,
+    pinned: false,
+    about: user?.about || "",
+  };
+};
+
+const formatMessage = (message) => ({
+  id: message._id,
+  type: "msg",
+  subtype:
+    message.type === "Media"
+      ? "img"
+      : message.type === "Document"
+      ? "doc"
+      : message.type === "Link"
+      ? "Link"
+      : "text",
+  message: message.text,
+  img: buildS3Url(message.file),
+  file: buildS3Url(message.file),
+  incoming: message.to === user_id,
+  outgoing: message.from === user_id,
+});
+
 const slice = createSlice({
   name: "conversation",
   initialState,
   reducers: {
     fetchDirectConversations(state, action) {
-      const list = action.payload.conversations.map((el) => {
-        const user = el.participants.find(
-          (elm) => elm._id.toString() !== user_id
-        );
-        return {
-          id: el._id,
-          user_id: user?._id,
-          name: `${user?.firstName} ${user?.lastName}`,
-          online: user?.status === "Online",
-          img: `https://${S3_BUCKET_NAME}.s3.${AWS_S3_REGION}.amazonaws.com/${user?.avatar}`,
-          msg: el.messages.slice(-1)[0].text, 
-          time: "9:36",
-          unread: 0,
-          pinned: false,
-          about: user?.about,
-        };
-      });
-
-      state.direct_chat.conversations = list;
+      state.direct_chat.conversations = action.payload.conversations.map(
+        formatConversation
+      );
     },
     updateDirectConversation(state, action) {
       const this_conversation = action.payload.conversation;
@@ -44,22 +77,9 @@ const slice = createSlice({
         (el) => {
           if (el?.id !== this_conversation._id) {
             return el;
-          } else {
-            const user = this_conversation.participants.find(
-              (elm) => elm._id.toString() !== user_id
-            );
-            return {
-              id: this_conversation._id._id,
-              user_id: user?._id,
-              name: `${user?.firstName} ${user?.lastName}`,
-              online: user?.status === "Online",
-              img: faker.image.avatar(),
-              msg: faker.music.songName(),
-              time: "9:36",
-              unread: 0,
-              pinned: false,
-            };
           }
+
+          return formatConversation(this_conversation);
         }
       );
     },
@@ -71,32 +91,15 @@ const slice = createSlice({
       state.direct_chat.conversations = state.direct_chat.conversations.filter(
         (el) => el?.id !== this_conversation._id
       );
-      state.direct_chat.conversations.push({
-        id: this_conversation._id._id,
-        user_id: user?._id,
-        name: `${user?.firstName} ${user?.lastName}`,
-        online: user?.status === "Online",
-        img: faker.image.avatar(),
-        msg: faker.music.songName(),
-        time: "9:36",
-        unread: 0,
-        pinned: false,
-      });
+      state.direct_chat.conversations.push(formatConversation(this_conversation));
     },
     setCurrentConversation(state, action) {
       state.direct_chat.current_conversation = action.payload;
     },
     fetchCurrentMessages(state, action) {
-      const messages = action.payload.messages;
-      const formatted_messages = messages.map((el) => ({
-        id: el._id,
-        type: "msg",
-        subtype: el.type,
-        message: el.text,
-        incoming: el.to === user_id,
-        outgoing: el.from === user_id,
-      }));
-      state.direct_chat.current_messages = formatted_messages;
+      state.direct_chat.current_messages = action.payload.messages.map(
+        formatMessage
+      );
     },
     addDirectMessage(state, action) {
       state.direct_chat.current_messages.push(action.payload.message);

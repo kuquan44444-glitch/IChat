@@ -1,9 +1,10 @@
 import React from "react";
 import { Box, Badge, Stack, Avatar, Typography } from "@mui/material";
 import { styled, useTheme, alpha } from "@mui/material/styles";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { SelectConversation } from "../redux/slices/app";
+import useResponsive from "../hooks/useResponsive";
 
 const truncateText = (string, n) => {
   return string?.length > n ? `${string?.slice(0, n)}...` : string;
@@ -46,10 +47,12 @@ const StyledBadge = styled(Badge)(({ theme }) => ({
 
 const ChatElement = ({ img, name, msg, time, unread, online, id }) => {
   const dispatch = useDispatch();
-  const {room_id} = useSelector((state) => state.app);
+  const navigate = useNavigate();
+  const isMobile = useResponsive("down", "md");
+  const { room_id } = useSelector((state) => state.app);
   const selectedChatId = room_id?.toString();
 
-  let isSelected = +selectedChatId === id;
+  let isSelected = selectedChatId === id?.toString();
 
   if (!selectedChatId) {
     isSelected = false;
@@ -60,7 +63,10 @@ const ChatElement = ({ img, name, msg, time, unread, online, id }) => {
   return (
     <StyledChatBox
       onClick={() => {
-        dispatch(SelectConversation({room_id: id}));
+        dispatch(SelectConversation({ room_id: id }));
+        if (isMobile) {
+          navigate("/conversation");
+        }
       }}
       sx={{
         width: "100%",
