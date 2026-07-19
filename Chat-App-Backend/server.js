@@ -1,8 +1,8 @@
 const mongoose = require("mongoose");
-const jwt = require("jsonwebtoken");
 const dotenv = require("dotenv");
 const path = require("path");
-dotenv.config({ path: "./config.env" });
+
+dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
 
 process.on("uncaughtException", (err) => {
   console.log(err);
@@ -16,42 +16,35 @@ const http = require("http");
 const server = http.createServer(app);
 
 const { Server } = require("socket.io"); // Add this
-const { promisify } = require("util");
 const User = require("./models/user");
 const FriendRequest = require("./models/friendRequest");
 const OneToOneMessage = require("./models/OneToOneMessage");
 const AudioCall = require("./models/audioCall");
 const VideoCall = require("./models/videoCall");
 
-// Add this
-// Create an io server and allow for CORS from http://localhost:3000 with GET and POST methods
+const socketCors = {
+  methods: ["GET", "POST"],
+};
+
+if (process.env.CLIENT_URL) {
+  socketCors.origin = process.env.CLIENT_URL;
+}
+
 const io = new Server(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"],
-  },
+  cors: socketCors,
 });
 
 const DB = process.env.DATABASE;
 
-// Temporarily disable MongoDB connection for testing
-// mongoose
-//   .connect(DB, {
-//     // useNewUrlParser: true, // The underlying MongoDB driver has deprecated their current connection string parser. Because this is a major change, they added the useNewUrlParser flag to allow users to fall back to the old parser if they find a bug in the new parser.
-//     // useCreateIndex: true, // Again previously MongoDB used an ensureIndex function call to ensure that Indexes exist and, if they didn't, to create one. This too was deprecated in favour of createIndex . the useCreateIndex option ensures that you are using the new function calls.
-//     // useFindAndModify: false, // findAndModify is deprecated. Use findOneAndUpdate, findOneAndReplace or findOneAndDelete instead.
-//     // useUnifiedTopology: true, // Set to true to opt in to using the MongoDB driver's new connection management engine. You should set this option to true , except for the unlikely case that it prevents you from maintaining a stable connection.
-//   })
-//   .then((con) => {
-//     console.log("DB Connection successful");
-//   })
-//   .catch((err) => {
-//     console.log("DB Connection failed:", err.message);
-//     console.log("Server will continue running without database connection");
-//   });
-
-console.log("MongoDB connection temporarily disabled for testing");
-console.log("Server will run without database - some features may not work");
+mongoose
+  .connect(DB)
+  .then(() => {
+    console.log("DB Connection successful");
+  })
+  .catch((err) => {
+    console.log("DB Connection failed:", err.message);
+    process.exit(1);
+  });
 
 const port = process.env.PORT || 8000;
 

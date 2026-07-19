@@ -55,10 +55,12 @@ const SettingsProvider = ({ children }) => {
 
   useEffect(() => {
     if (isArabic) {
-      onChangeDirectionByLang("ar");
+      setSettings((currentSettings) => ({
+        ...currentSettings,
+        themeDirection: "rtl",
+      }));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isArabic]);
+  }, [isArabic, setSettings]);
 
   // Mode
 

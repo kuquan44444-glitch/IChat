@@ -61,16 +61,26 @@ export function responsiveFontSizes({ sm, md, lg }) {
 // ----------------------------------------------------------------------
 
 function useWidth() {
-  const theme = useTheme();
+  const upXl = useResponsive('up', 'xl');
+  const upLg = useResponsive('up', 'lg');
+  const upMd = useResponsive('up', 'md');
+  const upSm = useResponsive('up', 'sm');
 
-  const keys = [...theme.breakpoints.keys].reverse();
+  if (upXl) {
+    return 'xl';
+  }
 
-  return (
-    keys.reduce((output, key) => {
-      // eslint-disable-next-line react-hooks/rules-of-hooks
-      const matches = useResponsive('up', key);
+  if (upLg) {
+    return 'lg';
+  }
 
-      return !output && matches ? key : output;
-    }, null) || 'xs'
-  );
+  if (upMd) {
+    return 'md';
+  }
+
+  if (upSm) {
+    return 'sm';
+  }
+
+  return 'xs';
 }

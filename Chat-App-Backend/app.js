@@ -1,5 +1,6 @@
 const express = require("express"); // web framework for Node.js.
 const morgan = require("morgan"); // HTTP request logger middleware for node.js
+const path = require("path");
 
 const routes = require("./routes/index");
 
@@ -43,17 +44,18 @@ const session = require("cookie-session"); // Simple cookie-based session middle
 
 
 const app = express();
+const clientBuildPath = path.resolve(__dirname, "..", "build");
+const corsOptions = {
+  methods: ["GET", "PATCH", "POST", "DELETE", "PUT"],
+  credentials: true,
+};
+
+if (process.env.CLIENT_URL) {
+  corsOptions.origin = process.env.CLIENT_URL;
+}
 
 app.use(
-  cors({
-    origin: "*",
-
-    methods: ["GET", "PATCH", "POST", "DELETE", "PUT"],
-
-    credentials: true, //
-
-    //   Access-Control-Allow-Credentials is a header that, when set to true , tells browsers to expose the response to the frontend JavaScript code. The credentials consist of cookies, authorization headers, and TLS client certificates.
-  })
+  cors(corsOptions)
 );
 
 app.use(cookieParser());
@@ -100,5 +102,11 @@ app.use(mongosanitize());
 app.use(xss());
 
 app.use(routes);
+
+app.use(express.static(clientBuildPath));
+
+app.get("*", (req, res) => {
+  res.sendFile(path.join(clientBuildPath, "index.html"));
+});
 
 module.exports = app;
