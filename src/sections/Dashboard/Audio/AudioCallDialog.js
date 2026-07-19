@@ -18,7 +18,7 @@ import axiosInstance from "../../../utils/axios";
 
 import { socket } from "../../../socket";
 import { ResetAudioCallQueue } from "../../../redux/slices/audioCall";
-import { AWS_S3_REGION, S3_BUCKET_NAME } from "../../../config";
+import { getFileUrl } from "../../../utils/file";
 
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
@@ -316,14 +316,14 @@ const AudioCallDialog = ({ open, handleClose }) => {
             <Stack>
               <Avatar
                 sx={{ height: 100, width: 100 }}
-                src={`https://${S3_BUCKET_NAME}.s3.${AWS_S3_REGION}.amazonaws.com/${call_details?.from_user?.avatar}`}
+                src={getFileUrl(call_details?.from_user?.avatar)}
               />
               <audio id="local-audio" controls={false} />
             </Stack>
             <Stack>
               <Avatar
                 sx={{ height: 100, width: 100 }}
-                src={`https://${S3_BUCKET_NAME}.s3.${AWS_S3_REGION}.amazonaws.com/${user?.avatar}`}
+                src={getFileUrl(user?.avatar)}
               />
               <audio id="remote-audio" controls={false} />
             </Stack>

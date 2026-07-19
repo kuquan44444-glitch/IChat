@@ -13,17 +13,39 @@ const { promisify } = require("util");
 const catchAsync = require("../utils/catchAsync");
 
 // this function will return you jwt token
-const signToken = (userId) => jwt.sign({ userId }, process.env.JWT_SECRET);
+const signToken = (userId) =>
+  jwt.sign({ userId }, process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_EXPIRES_IN || "7d",
+  });
+
+const isEmailVerificationEnabled = () =>
+  process.env.ENABLE_EMAIL_VERIFICATION === "true";
+
+const createAuthResponse = (user, message) => ({
+  status: "success",
+  message,
+  token: signToken(user._id),
+  user_id: user._id,
+  user: {
+    _id: user._id,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    email: user.email,
+    avatar: user.avatar,
+    about: user.about,
+    verified: user.verified,
+  },
+});
 
 // Register New User
 
 
 
 exports.register = catchAsync(async (req, res, next) => {
-  const { firstName, lastName, email, password } = req.body;
+  const email = req.body.email?.toLowerCase();
 
   const filteredBody = filterObj(
-    req.body,
+    { ...req.body, email },
     "firstName",
     "lastName",
     "email",
@@ -41,28 +63,69 @@ exports.register = catchAsync(async (req, res, next) => {
       message: "Email already in use, Please login.",
     });
   } else if (existing_user) {
-    // if not verified than update prev one
+    existing_user.firstName = filteredBody.firstName;
+    existing_user.lastName = filteredBody.lastName;
+    existing_user.email = filteredBody.email;
+    existing_user.password = filteredBody.password;
+    existing_user.verified = !isEmailVerificationEnabled();
 
-    await User.findOneAndUpdate({ email: email }, filteredBody, {
-      new: true,
-      validateModifiedOnly: true,
+    if (!isEmailVerificationEnabled()) {
+      existing_user.otp = undefined;
+      existing_user.otp_expiry_time = undefined;
+    }
+
+    await existing_user.save();
+
+    if (!isEmailVerificationEnabled()) {
+      return res.status(201).json({
+        ...createAuthResponse(existing_user, "Registered successfully!"),
+        requiresEmailVerification: false,
+      });
+    }
+
+    req.userId = existing_user._id;
+    return next();
+  } else {
+    const new_user = await User.create({
+      ...filteredBody,
+      verified: !isEmailVerificationEnabled(),
     });
 
-    // generate an otp and send to email
-    req.userId = existing_user._id;
-    next();
-  } else {
-    // if user is not created before than create a new one
-    const new_user = await User.create(filteredBody);
+    if (!isEmailVerificationEnabled()) {
+      return res.status(201).json({
+        ...createAuthResponse(new_user, "Registered successfully!"),
+        requiresEmailVerification: false,
+      });
+    }
 
-    // generate an otp and send to email
     req.userId = new_user._id;
-    next();
+    return next();
   }
 });
 
 exports.sendOTP = catchAsync(async (req, res, next) => {
-  const { userId } = req;
+  if (!isEmailVerificationEnabled()) {
+    return res.status(200).json({
+      status: "success",
+      message: "Email verification is disabled.",
+      requiresEmailVerification: false,
+    });
+  }
+
+  let userId = req.userId;
+
+  if (!userId && req.body.email) {
+    const user = await User.findOne({ email: req.body.email.toLowerCase() });
+    userId = user?._id;
+  }
+
+  if (!userId) {
+    return res.status(400).json({
+      status: "error",
+      message: "Unable to identify user for OTP delivery",
+    });
+  }
+
   const new_otp = otpGenerator.generate(6, {
     upperCaseAlphabets: false,
     specialChars: false,
@@ -93,6 +156,7 @@ exports.sendOTP = catchAsync(async (req, res, next) => {
   res.status(200).json({
     status: "success",
     message: "OTP Sent Successfully!",
+    requiresEmailVerification: true,
   });
 });
 
@@ -143,11 +207,8 @@ exports.verifyOTP = catchAsync(async (req, res, next) => {
   });
 });
 
-// User Login - Mock version for testing
 exports.login = catchAsync(async (req, res, next) => {
   const { email, password } = req.body;
-
-  console.log("Login attempt:", email, password);
 
   if (!email || !password) {
     res.status(400).json({
@@ -157,26 +218,27 @@ exports.login = catchAsync(async (req, res, next) => {
     return;
   }
 
-  // Mock authentication for testing
-  // Accept any email/password combination for now
-  const mockUser = {
-    _id: "mock_user_id_123",
-    email: email,
-    firstName: "Test",
-    lastName: "User"
-  };
+  const user = await User.findOne({ email: email.toLowerCase() }).select(
+    "+password"
+  );
 
-  const token = signToken(mockUser._id);
+  if (!user || !(await user.correctPassword(password, user.password))) {
+    return res.status(401).json({
+      status: "error",
+      message: "Incorrect email or password",
+    });
+  }
 
-  res.status(200).json({
-    status: "success",
-    message: "Logged in successfully!",
-    token,
-    user_id: mockUser._id,
-  });
+  if (isEmailVerificationEnabled() && !user.verified) {
+    return res.status(403).json({
+      status: "error",
+      message: "Please verify your email before logging in",
+    });
+  }
+
+  res.status(200).json(createAuthResponse(user, "Logged in successfully!"));
 });
 
-// Protect - Mock version for testing
 exports.protect = catchAsync(async (req, res, next) => {
   // 1) Getting token and check if it's there
   let token;
@@ -198,18 +260,22 @@ exports.protect = catchAsync(async (req, res, next) => {
   // 2) Verification of token
   const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
 
-  console.log("Token decoded:", decoded);
+  const currentUser = await User.findById(decoded.userId);
 
-  // Mock user for testing
-  const mockUser = {
-    _id: decoded.userId,
-    email: "test@example.com",
-    firstName: "Test",
-    lastName: "User"
-  };
+  if (!currentUser) {
+    return res.status(401).json({
+      message: "The user belonging to this token no longer exists.",
+    });
+  }
+
+  if (currentUser.changedPasswordAfter(decoded.iat)) {
+    return res.status(401).json({
+      message: "User recently changed password! Please log in again.",
+    });
+  }
 
   // GRANT ACCESS TO PROTECTED ROUTE
-  req.user = mockUser;
+  req.user = currentUser;
   next();
 });
 

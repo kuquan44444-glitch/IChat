@@ -1,9 +1,17 @@
 const AudioCall = require("../models/audioCall");
-const FriendRequest = require("../models/friendRequest");
+const Conversation = require("../models/Conversation");
+const Friend = require("../models/Friend");
+const Message = require("../models/Message");
+const Notification = require("../models/Notification");
 const User = require("../models/user");
 const VideoCall = require("../models/videoCall");
 const catchAsync = require("../utils/catchAsync");
 const filterObj = require("../utils/filterObj");
+const {
+  createSignedUploadUrl,
+  createUploadTarget,
+  getPublicFileUrl,
+} = require("../utils/storage");
 
 const { generateToken04 } = require("./zegoServerAssistant");
 
@@ -15,22 +23,29 @@ const appID = process.env.ZEGO_APP_ID; // type: number
 // Example：'sdfsdfsd323sdfsdf'
 const serverSecret = process.env.ZEGO_SERVER_SECRET; // type: 32 byte length string
 
-exports.getMe = catchAsync(async (req, res, next) => {
-  // Mock user data for testing
-  const mockUser = {
-    _id: req.user._id,
-    firstName: "Test",
-    lastName: "User",
-    email: "test@example.com",
-    avatar: "https://via.placeholder.com/150",
-    about: "Test user for development",
-    verified: true,
-    friends: []
+const formatUser = (userDoc) => {
+  if (!userDoc) {
+    return null;
+  }
+
+  return {
+    _id: userDoc._id,
+    firstName: userDoc.firstName,
+    lastName: userDoc.lastName,
+    email: userDoc.email,
+    about: userDoc.about,
+    avatar: getPublicFileUrl(userDoc.avatar),
+    verified: userDoc.verified,
+    status: userDoc.status,
   };
+};
+
+exports.getMe = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user._id);
 
   res.status(200).json({
     status: "success",
-    data: mockUser,
+    data: formatUser(user),
   });
 });
 
@@ -43,38 +58,38 @@ exports.updateMe = catchAsync(async (req, res, next) => {
     "avatar"
   );
 
-  const userDoc = await User.findByIdAndUpdate(req.user._id, filteredBody);
+  const userDoc = await User.findByIdAndUpdate(req.user._id, filteredBody, {
+    new: true,
+    runValidators: true,
+  });
 
   res.status(200).json({
     status: "success",
-    data: userDoc,
+    data: formatUser(userDoc),
     message: "User Updated successfully",
   });
 });
 
 exports.getUsers = catchAsync(async (req, res, next) => {
-  // Mock users data for testing
-  const mockUsers = [
-    {
-      _id: "user1",
-      firstName: "John",
-      lastName: "Doe"
-    },
-    {
-      _id: "user2", 
-      firstName: "Jane",
-      lastName: "Smith"
-    },
-    {
-      _id: "user3",
-      firstName: "Bob",
-      lastName: "Johnson"
-    }
-  ];
+  const relations = await Friend.find({
+    $or: [{ requester: req.user._id }, { recipient: req.user._id }],
+  });
+
+  const excludedIds = new Set([req.user._id.toString()]);
+
+  relations.forEach((relation) => {
+    excludedIds.add(relation.requester.toString());
+    excludedIds.add(relation.recipient.toString());
+  });
+
+  const users = await User.find({
+    verified: true,
+    _id: { $nin: Array.from(excludedIds) },
+  }).select("firstName lastName email avatar about status");
 
   res.status(200).json({
     status: "success",
-    data: mockUsers,
+    data: users.map(formatUser),
     message: "Users found successfully!",
   });
 });
@@ -90,32 +105,75 @@ exports.getAllVerifiedUsers = catchAsync(async (req, res, next) => {
 
   res.status(200).json({
     status: "success",
-    data: remaining_users,
+    data: remaining_users.map(formatUser),
     message: "Users found successfully!",
   });
 });
 
 exports.getRequests = catchAsync(async (req, res, next) => {
-  const requests = await FriendRequest.find({ recipient: req.user._id })
-    .populate("sender")
-    .select("_id firstName lastName");
+  const requests = await Friend.find({
+    recipient: req.user._id,
+    status: "pending",
+  }).populate("requester", "firstName lastName email avatar about status");
 
   res.status(200).json({
     status: "success",
-    data: requests,
+    data: requests.map((request) => ({
+      _id: request._id,
+      sender: formatUser(request.requester),
+    })),
     message: "Requests found successfully!",
   });
 });
 
 exports.getFriends = catchAsync(async (req, res, next) => {
-  const this_user = await User.findById(req.user._id).populate(
-    "friends",
-    "_id firstName lastName"
-  );
+  const relations = await Friend.find({
+    status: "accepted",
+    $or: [{ requester: req.user._id }, { recipient: req.user._id }],
+  }).populate("requester recipient", "firstName lastName email avatar about status");
+
+  const friends = relations.map((relation) => {
+    const friend =
+      relation.requester._id.toString() === req.user._id.toString()
+        ? relation.recipient
+        : relation.requester;
+
+    return formatUser(friend);
+  });
+
   res.status(200).json({
     status: "success",
-    data: this_user.friends,
+    data: friends,
     message: "Friends found successfully!",
+  });
+});
+
+exports.getUploadUrl = catchAsync(async (req, res, next) => {
+  const { fileName, fileType, folder } = req.body;
+
+  if (!fileName || !fileType) {
+    return res.status(400).json({
+      status: "error",
+      message: "fileName and fileType are required",
+    });
+  }
+
+  const uploadTarget = createUploadTarget({
+    folder,
+    originalName: fileName,
+    contentType: fileType,
+  });
+  const uploadUrl = await createSignedUploadUrl({
+    key: uploadTarget.key,
+    contentType: fileType,
+  });
+
+  res.status(200).json({
+    status: "success",
+    data: {
+      ...uploadTarget,
+      uploadUrl,
+    },
   });
 });
 
@@ -163,7 +221,6 @@ exports.startAudioCall = catchAsync(async (req, res, next) => {
   const from = req.user._id;
   const to = req.body.id;
 
-  const from_user = await User.findById(from);
   const to_user = await User.findById(to);
 
   // create a new call audioCall Doc and send required data to client
@@ -176,7 +233,7 @@ exports.startAudioCall = catchAsync(async (req, res, next) => {
 
   res.status(200).json({
     data: {
-      from: to_user,
+      from_user: formatUser(to_user),
       roomID: new_audio_call._id,
       streamID: to,
       userID: from,
@@ -189,7 +246,6 @@ exports.startVideoCall = catchAsync(async (req, res, next) => {
   const from = req.user._id;
   const to = req.body.id;
 
-  const from_user = await User.findById(from);
   const to_user = await User.findById(to);
 
   // create a new call videoCall Doc and send required data to client
@@ -202,7 +258,7 @@ exports.startVideoCall = catchAsync(async (req, res, next) => {
 
   res.status(200).json({
     data: {
-      from: to_user,
+      from_user: formatUser(to_user),
       roomID: new_video_call._id,
       streamID: to,
       userID: from,
@@ -234,9 +290,9 @@ exports.getCallLogs = catchAsync(async (req, res, next) => {
       // outgoing
       call_logs.push({
         id: elm._id,
-        img: other_user.avatar,
+        img: getPublicFileUrl(other_user.avatar),
         name: other_user.firstName,
-        online: true,
+        online: other_user.status === "Online",
         incoming: false,
         missed,
       });
@@ -247,10 +303,10 @@ exports.getCallLogs = catchAsync(async (req, res, next) => {
       // outgoing
       call_logs.push({
         id: elm._id,
-        img: other_user.avatar,
+        img: getPublicFileUrl(other_user.avatar),
         name: other_user.firstName,
-        online: true,
-        incoming: false,
+        online: other_user.status === "Online",
+        incoming: true,
         missed,
       });
     }
@@ -264,9 +320,9 @@ exports.getCallLogs = catchAsync(async (req, res, next) => {
       // outgoing
       call_logs.push({
         id: element._id,
-        img: other_user.avatar,
+        img: getPublicFileUrl(other_user.avatar),
         name: other_user.firstName,
-        online: true,
+        online: other_user.status === "Online",
         incoming: false,
         missed,
       });
@@ -277,10 +333,10 @@ exports.getCallLogs = catchAsync(async (req, res, next) => {
       // outgoing
       call_logs.push({
         id: element._id,
-        img: other_user.avatar,
+        img: getPublicFileUrl(other_user.avatar),
         name: other_user.firstName,
-        online: true,
-        incoming: false,
+        online: other_user.status === "Online",
+        incoming: true,
         missed,
       });
     }

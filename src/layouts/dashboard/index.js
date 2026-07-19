@@ -4,12 +4,21 @@ import { Navigate, Outlet } from "react-router-dom";
 import useResponsive from "../../hooks/useResponsive";
 import SideNav from "./SideNav";
 import { useDispatch, useSelector } from "react-redux";
-import { FetchUserProfile, SelectConversation, showSnackbar } from "../../redux/slices/app";
+import {
+  FetchFriendRequests,
+  FetchFriends,
+  FetchUserProfile,
+  FetchUsers,
+  SelectConversation,
+  showSnackbar,
+} from "../../redux/slices/app";
 import { socket, connectSocket } from "../../socket";
 import {
   UpdateDirectConversation,
   AddDirectConversation,
   AddDirectMessage,
+  SetUserStatus,
+  SetUserTyping,
 } from "../../redux/slices/conversation";
 import AudioCallNotification from "../../sections/Dashboard/Audio/AudioCallNotification";
 import VideoCallNotification from "../../sections/Dashboard/video/VideoCallNotification";
@@ -37,8 +46,10 @@ const DashboardLayout = () => {
   );
 
   useEffect(() => {
-    dispatch(FetchUserProfile());
-  }, []);
+    if (isLoggedIn) {
+      dispatch(FetchUserProfile());
+    }
+  }, [dispatch, isLoggedIn]);
   
 
   const handleCloseAudioDialog = () => {
@@ -49,33 +60,36 @@ const DashboardLayout = () => {
   };
 
   useEffect(() => {
-    if (isLoggedIn) {
-      window.onload = function () {
-        if (!window.location.hash) {
-          window.location = window.location + "#loaded";
-          window.location.reload();
-        }
-      };
+    if (!isLoggedIn || !user_id) {
+      return undefined;
+    }
 
-      window.onload();
+    const activeSocket = connectSocket(user_id);
 
-      if (!socket) {
-        connectSocket(user_id);
-      }
+    activeSocket.off("audio_call_notification");
+    activeSocket.off("video_call_notification");
+    activeSocket.off("new_message");
+    activeSocket.off("start_chat");
+    activeSocket.off("new_friend_request");
+    activeSocket.off("request_accepted");
+    activeSocket.off("request_sent");
+    activeSocket.off("typing");
+    activeSocket.off("stop_typing");
+    activeSocket.off("user_status_changed");
+    activeSocket.off("new_notification");
 
-      socket.on("audio_call_notification", (data) => {
+    activeSocket.on("audio_call_notification", (data) => {
         // TODO => dispatch an action to add this in call_queue
         dispatch(PushToAudioCallQueue(data));
-      });
+    });
       
-      socket.on("video_call_notification", (data) => {
+    activeSocket.on("video_call_notification", (data) => {
         // TODO => dispatch an action to add this in call_queue
         dispatch(PushToVideoCallQueue(data));
-      });
+    });
 
-      socket.on("new_message", (data) => {
+    activeSocket.on("new_message", (data) => {
         const message = data.message;
-        console.log(current_conversation, data);
         // check if msg we got is from currently selected conversation
         if (current_conversation?.id === data.conversation_id) {
           dispatch(
@@ -84,15 +98,15 @@ const DashboardLayout = () => {
               type: "msg",
               subtype: message.type,
               message: message.text,
-              incoming: message.to === user_id,
-              outgoing: message.from === user_id,
+              file: message.file,
+              incoming: message.to?.toString() === user_id,
+              outgoing: message.from?.toString() === user_id,
             })
           );
         }
-      });
+    });
 
-      socket.on("start_chat", (data) => {
-        console.log(data);
+    activeSocket.on("start_chat", (data) => {
         // add / update to conversation list
         const existing_conversation = conversations.find(
           (el) => el?.id === data._id
@@ -105,46 +119,76 @@ const DashboardLayout = () => {
           dispatch(AddDirectConversation({ conversation: data }));
         }
         dispatch(SelectConversation({ room_id: data._id }));
-      });
+    });
 
-      socket.on("new_friend_request", (data) => {
+    activeSocket.on("new_friend_request", (data) => {
         dispatch(
           showSnackbar({
             severity: "success",
             message: "New friend request received",
           })
         );
-      });
+        dispatch(FetchFriendRequests());
+        dispatch(FetchUsers());
+    });
 
-      socket.on("request_accepted", (data) => {
+    activeSocket.on("request_accepted", (data) => {
         dispatch(
           showSnackbar({
             severity: "success",
             message: "Friend Request Accepted",
           })
         );
-      });
+        dispatch(FetchFriendRequests());
+        dispatch(FetchFriends());
+        dispatch(FetchUsers());
+    });
 
-      socket.on("request_sent", (data) => {
+    activeSocket.on("request_sent", (data) => {
         dispatch(showSnackbar({ severity: "success", message: data.message }));
-      });
-    }
+        dispatch(FetchUsers());
+    });
+
+    activeSocket.on("typing", (data) => {
+      dispatch(SetUserTyping({ conversation_id: data.conversation_id, isTyping: true }));
+    });
+
+    activeSocket.on("stop_typing", (data) => {
+      dispatch(SetUserTyping({ conversation_id: data.conversation_id, isTyping: false }));
+    });
+
+    activeSocket.on("user_status_changed", (data) => {
+      dispatch(SetUserStatus(data));
+    });
+
+    activeSocket.on("new_notification", (data) => {
+      dispatch(
+        showSnackbar({
+          severity: "info",
+          message: data.message || "New notification",
+        })
+      );
+    });
 
     // Remove event listener on component unmount
     return () => {
-      socket?.off("new_friend_request");
-      socket?.off("request_accepted");
-      socket?.off("request_sent");
-      socket?.off("start_chat");
-      socket?.off("new_message");
-      socket?.off("audio_call_notification");
+      activeSocket?.off("new_friend_request");
+      activeSocket?.off("request_accepted");
+      activeSocket?.off("request_sent");
+      activeSocket?.off("start_chat");
+      activeSocket?.off("new_message");
+      activeSocket?.off("audio_call_notification");
+      activeSocket?.off("video_call_notification");
+      activeSocket?.off("typing");
+      activeSocket?.off("stop_typing");
+      activeSocket?.off("user_status_changed");
+      activeSocket?.off("new_notification");
     };
-  }, [isLoggedIn, socket]);
+  }, [dispatch, isLoggedIn, user_id, current_conversation?.id, conversations]);
 
-  // Skip authentication for testing
-  // if (!isLoggedIn) {
-  //   return <Navigate to={"/auth/login"} />;
-  // }
+  if (!isLoggedIn) {
+    return <Navigate to={"/auth/login"} />;
+  }
 
   return (
     <>

@@ -9,7 +9,7 @@ import { Stack } from "@mui/material";
 import { LoadingButton } from "@mui/lab";
 import { useDispatch, useSelector } from "react-redux";
 import { UpdateUserProfile } from "../../../redux/slices/app";
-import { AWS_S3_REGION, S3_BUCKET_NAME } from "../../../config";
+import { getFileUrl } from "../../../utils/file";
 
 const ProfileForm = () => {
   const dispatch = useDispatch();
@@ -25,7 +25,7 @@ const ProfileForm = () => {
   const defaultValues = {
     firstName: user?.firstName,
     about: user?.about,
-    avatar: `https://${S3_BUCKET_NAME}.s3.${AWS_S3_REGION}.amazonaws.com/${user?.avatar}`,
+    avatar: getFileUrl(user?.avatar),
   };
 
   const methods = useForm({

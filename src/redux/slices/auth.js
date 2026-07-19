@@ -6,13 +6,30 @@ import { showSnackbar } from "./app";
 // ----------------------------------------------------------------------
 
 const initialState = {
-  isLoggedIn: true, // Skip authentication - set to true by default
-  token: "mock_token_123",
+  isLoggedIn: Boolean(window.localStorage.getItem("accessToken")),
+  token: window.localStorage.getItem("accessToken") || "",
   isLoading: false,
   user: null,
-  user_id: "mock_user_id_123",
-  email: "test@example.com",
+  user_id: window.localStorage.getItem("user_id") || null,
+  email: "",
   error: false,
+};
+
+const persistSession = (token, userId) => {
+  if (token) {
+    window.localStorage.setItem("accessToken", token);
+    axios.defaults.headers.common.Authorization = `Bearer ${token}`;
+  }
+
+  if (userId) {
+    window.localStorage.setItem("user_id", userId);
+  }
+};
+
+const clearSession = () => {
+  window.localStorage.removeItem("accessToken");
+  window.localStorage.removeItem("user_id");
+  delete axios.defaults.headers.common.Authorization;
 };
 
 const slice = createSlice({
@@ -32,6 +49,7 @@ const slice = createSlice({
       state.isLoggedIn = false;
       state.token = "";
       state.user_id = null;
+      state.user = null;
     },
     updateRegisterEmail(state, action) {
       state.email = action.payload.email;
@@ -64,8 +82,10 @@ export function NewPassword(formValues) {
             slice.actions.logIn({
               isLoggedIn: true,
               token: response.data.token,
+              user_id: response.data.user_id,
             })
           );
+        persistSession(response.data.token, response.data.user_id);
         dispatch(
           showSnackbar({ severity: "success", message: response.data.message })
         );
@@ -146,7 +166,7 @@ export function LoginUser(formValues) {
             user_id: response.data.user_id,
           })
         );
-        window.localStorage.setItem("user_id", response.data.user_id);
+        persistSession(response.data.token, response.data.user_id);
         dispatch(
           showSnackbar({ severity: "success", message: response.data.message })
         );
@@ -166,7 +186,7 @@ export function LoginUser(formValues) {
 
 export function LogoutUser() {
   return async (dispatch, getState) => {
-    window.localStorage.removeItem("user_id");
+    clearSession();
     dispatch(slice.actions.signOut());
   };
 }
@@ -189,10 +209,24 @@ export function RegisterUser(formValues) {
       )
       .then(function (response) {
         console.log(response);
-        dispatch(
-          slice.actions.updateRegisterEmail({ email: formValues.email })
-        );
+        const requiresEmailVerification =
+          response.data.requiresEmailVerification !== false;
 
+        if (requiresEmailVerification) {
+          dispatch(
+            slice.actions.updateRegisterEmail({ email: formValues.email })
+          );
+        } else {
+          dispatch(slice.actions.updateRegisterEmail({ email: "" }));
+          dispatch(
+            slice.actions.logIn({
+              isLoggedIn: true,
+              token: response.data.token,
+              user_id: response.data.user_id,
+            })
+          );
+          persistSession(response.data.token, response.data.user_id);
+        }
         dispatch(
           showSnackbar({ severity: "success", message: response.data.message })
         );
@@ -208,7 +242,7 @@ export function RegisterUser(formValues) {
         );
       })
       .finally(() => {
-        if (!getState().auth.error) {
+        if (!getState().auth.error && getState().auth.email) {
           window.location.href = "/auth/verify";
         }
       });
@@ -234,13 +268,14 @@ export function VerifyEmail(formValues) {
       .then(function (response) {
         console.log(response);
         dispatch(slice.actions.updateRegisterEmail({ email: "" }));
-        window.localStorage.setItem("user_id", response.data.user_id);
         dispatch(
           slice.actions.logIn({
             isLoggedIn: true,
             token: response.data.token,
+            user_id: response.data.user_id,
           })
         );
+        persistSession(response.data.token, response.data.user_id);
 
 
         dispatch(

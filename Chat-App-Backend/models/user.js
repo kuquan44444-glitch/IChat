@@ -2,14 +2,17 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 
-const userSchema = new mongoose.Schema({
+const userSchema = new mongoose.Schema(
+  {
   firstName: {
     type: String,
     required: [true, "First Name is required"],
+    trim: true,
   },
   lastName: {
     type: String,
     required: [true, "Last Name is required"],
+    trim: true,
   },
   about: {
     type: String,
@@ -20,6 +23,9 @@ const userSchema = new mongoose.Schema({
   email: {
     type: String,
     required: [true, "Email is required"],
+    unique: true,
+    lowercase: true,
+    trim: true,
     validate: {
       validator: function (email) {
         return String(email)
@@ -32,28 +38,30 @@ const userSchema = new mongoose.Schema({
     },
   },
   password: {
-    // unselect
     type: String,
+    required: [true, "Password is required"],
+    minlength: 6,
+    select: false,
   },
   passwordChangedAt: {
-    // unselect
     type: Date,
+    select: false,
   },
   passwordResetToken: {
-    // unselect
     type: String,
+    select: false,
   },
   passwordResetExpires: {
-    // unselect
     type: Date,
+    select: false,
   },
   createdAt: {
     type: Date,
     default: Date.now(),
   },
   updatedAt: {
-    // unselect
     type: Date,
+    select: false,
   },
   verified: {
     type: Boolean,
@@ -72,13 +80,18 @@ const userSchema = new mongoose.Schema({
     },
   ],
   socket_id: {
-    type: String
+    type: String,
   },
   status: {
     type: String,
-    enum: ["Online", "Offline"]
+    enum: ["Online", "Offline"],
+    default: "Offline",
+  },
+  },
+  {
+    collection: "users",
   }
-});
+);
 
 userSchema.pre("save", async function (next) {
   // Only run this function if password was actually modified

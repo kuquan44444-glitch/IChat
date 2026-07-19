@@ -1,6 +1,5 @@
 import { createSlice } from "@reduxjs/toolkit";
-import { faker } from "@faker-js/faker";
-import { AWS_S3_REGION, S3_BUCKET_NAME } from "../../config";
+import { getFileUrl } from "../../utils/file";
 
 const user_id = window.localStorage.getItem("user_id");
 
@@ -27,12 +26,13 @@ const slice = createSlice({
           user_id: user?._id,
           name: `${user?.firstName} ${user?.lastName}`,
           online: user?.status === "Online",
-          img: `https://${S3_BUCKET_NAME}.s3.${AWS_S3_REGION}.amazonaws.com/${user?.avatar}`,
-          msg: el.messages.slice(-1)[0].text, 
+          img: getFileUrl(user?.avatar),
+          msg: el.lastMessage || "",
           time: "9:36",
           unread: 0,
           pinned: false,
           about: user?.about,
+          typing: false,
         };
       });
 
@@ -49,15 +49,17 @@ const slice = createSlice({
               (elm) => elm._id.toString() !== user_id
             );
             return {
-              id: this_conversation._id._id,
+              id: this_conversation._id,
               user_id: user?._id,
               name: `${user?.firstName} ${user?.lastName}`,
               online: user?.status === "Online",
-              img: faker.image.avatar(),
-              msg: faker.music.songName(),
+              img: getFileUrl(user?.avatar),
+              msg: this_conversation.lastMessage || "",
               time: "9:36",
               unread: 0,
               pinned: false,
+              about: user?.about,
+              typing: false,
             };
           }
         }
@@ -72,15 +74,17 @@ const slice = createSlice({
         (el) => el?.id !== this_conversation._id
       );
       state.direct_chat.conversations.push({
-        id: this_conversation._id._id,
+        id: this_conversation._id,
         user_id: user?._id,
         name: `${user?.firstName} ${user?.lastName}`,
         online: user?.status === "Online",
-        img: faker.image.avatar(),
-        msg: faker.music.songName(),
+        img: getFileUrl(user?.avatar),
+        msg: this_conversation.lastMessage || "",
         time: "9:36",
         unread: 0,
         pinned: false,
+        about: user?.about,
+        typing: false,
       });
     },
     setCurrentConversation(state, action) {
@@ -93,14 +97,34 @@ const slice = createSlice({
         type: "msg",
         subtype: el.type,
         message: el.text,
-        incoming: el.to === user_id,
-        outgoing: el.from === user_id,
+        file: el.file,
+        incoming: el.to?.toString() === user_id,
+        outgoing: el.from?.toString() === user_id,
       }));
       state.direct_chat.current_messages = formatted_messages;
     },
     addDirectMessage(state, action) {
       state.direct_chat.current_messages.push(action.payload.message);
-    }
+    },
+    setUserTyping(state, action) {
+      state.direct_chat.conversations = state.direct_chat.conversations.map(
+        (conversation) =>
+          conversation.id === action.payload.conversation_id
+            ? { ...conversation, typing: action.payload.isTyping }
+            : conversation
+      );
+    },
+    setUserStatus(state, action) {
+      state.direct_chat.conversations = state.direct_chat.conversations.map(
+        (conversation) =>
+          conversation.user_id === action.payload.user_id
+            ? {
+                ...conversation,
+                online: action.payload.status === "Online",
+              }
+            : conversation
+      );
+    },
   },
 });
 
@@ -143,3 +167,15 @@ export const AddDirectMessage = (message) => {
     dispatch(slice.actions.addDirectMessage({message}));
   }
 }
+
+export const SetUserTyping = ({ conversation_id, isTyping }) => {
+  return async (dispatch, getState) => {
+    dispatch(slice.actions.setUserTyping({ conversation_id, isTyping }));
+  };
+};
+
+export const SetUserStatus = ({ user_id, status }) => {
+  return async (dispatch, getState) => {
+    dispatch(slice.actions.setUserStatus({ user_id, status }));
+  };
+};
