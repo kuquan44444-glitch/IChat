@@ -1,6 +1,5 @@
 import { createSlice } from "@reduxjs/toolkit";
-import { faker } from "@faker-js/faker";
-import { AWS_S3_REGION, S3_BUCKET_NAME } from "../../config";
+import { getMediaUrl } from "../../utils/media";
 
 const user_id = window.localStorage.getItem("user_id");
 
@@ -27,8 +26,8 @@ const slice = createSlice({
           user_id: user?._id,
           name: `${user?.firstName} ${user?.lastName}`,
           online: user?.status === "Online",
-          img: `https://${S3_BUCKET_NAME}.s3.${AWS_S3_REGION}.amazonaws.com/${user?.avatar}`,
-          msg: el.messages.slice(-1)[0].text, 
+          img: getMediaUrl(user?.avatar),
+          msg: el.messages?.slice(-1)[0]?.text || "",
           time: "9:36",
           unread: 0,
           pinned: false,
@@ -49,15 +48,16 @@ const slice = createSlice({
               (elm) => elm._id.toString() !== user_id
             );
             return {
-              id: this_conversation._id._id,
+              id: this_conversation._id,
               user_id: user?._id,
               name: `${user?.firstName} ${user?.lastName}`,
               online: user?.status === "Online",
-              img: faker.image.avatar(),
-              msg: faker.music.songName(),
+              img: getMediaUrl(user?.avatar),
+              msg: this_conversation.messages?.slice(-1)[0]?.text || "",
               time: "9:36",
               unread: 0,
               pinned: false,
+              about: user?.about,
             };
           }
         }
@@ -72,15 +72,16 @@ const slice = createSlice({
         (el) => el?.id !== this_conversation._id
       );
       state.direct_chat.conversations.push({
-        id: this_conversation._id._id,
+        id: this_conversation._id,
         user_id: user?._id,
         name: `${user?.firstName} ${user?.lastName}`,
         online: user?.status === "Online",
-        img: faker.image.avatar(),
-        msg: faker.music.songName(),
+        img: getMediaUrl(user?.avatar),
+        msg: this_conversation.messages?.slice(-1)[0]?.text || "",
         time: "9:36",
         unread: 0,
         pinned: false,
+        about: user?.about,
       });
     },
     setCurrentConversation(state, action) {
@@ -93,8 +94,10 @@ const slice = createSlice({
         type: "msg",
         subtype: el.type,
         message: el.text,
-        incoming: el.to === user_id,
-        outgoing: el.from === user_id,
+        file: el.file,
+        fileName: el.fileName,
+        incoming: el.to?.toString() === user_id,
+        outgoing: el.from?.toString() === user_id,
       }));
       state.direct_chat.current_messages = formatted_messages;
     },

@@ -253,6 +253,10 @@ const Footer = () => {
             >
               <IconButton
                 onClick={() => {
+                  if (!socket || !room_id || !current_conversation?.user_id || !value.trim()) {
+                    return;
+                  }
+
                   socket.emit("text_message", {
                     message: linkify(value),
                     conversation_id: room_id,
@@ -260,6 +264,7 @@ const Footer = () => {
                     to: current_conversation.user_id,
                     type: containsUrl(value) ? "Link" : "Text",
                   });
+                  setValue("");
                 }}
               >
                 <PaperPlaneTilt color="#ffffff" />

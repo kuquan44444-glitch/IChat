@@ -24,21 +24,23 @@ import { PushToVideoCallQueue, UpdateVideoCallDialog } from "../../redux/slices/
 const DashboardLayout = () => {
   const isDesktop = useResponsive("up", "md");
   const dispatch = useDispatch();
-  const {user_id} = useSelector((state) => state.auth);
+  const { token } = useSelector((state) => state.auth);
   const { open_audio_notification_dialog, open_audio_dialog } = useSelector(
     (state) => state.audioCall
   );
   const { open_video_notification_dialog, open_video_dialog } = useSelector(
     (state) => state.videoCall
   );
-  const { isLoggedIn } = useSelector((state) => state.auth);
+  const { isLoggedIn, user_id } = useSelector((state) => state.auth);
   const { conversations, current_conversation } = useSelector(
     (state) => state.conversation.direct_chat
   );
 
   useEffect(() => {
-    dispatch(FetchUserProfile());
-  }, []);
+    if (isLoggedIn && token) {
+      dispatch(FetchUserProfile());
+    }
+  }, [dispatch, isLoggedIn, token]);
   
 
   const handleCloseAudioDialog = () => {
@@ -49,34 +51,22 @@ const DashboardLayout = () => {
   };
 
   useEffect(() => {
-    if (isLoggedIn) {
-      window.onload = function () {
-        if (!window.location.hash) {
-          window.location = window.location + "#loaded";
-          window.location.reload();
-        }
-      };
-
-      window.onload();
-
+    if (isLoggedIn && token) {
       if (!socket) {
-        connectSocket(user_id);
+        connectSocket(token);
       }
 
       socket.on("audio_call_notification", (data) => {
-        // TODO => dispatch an action to add this in call_queue
         dispatch(PushToAudioCallQueue(data));
       });
       
       socket.on("video_call_notification", (data) => {
-        // TODO => dispatch an action to add this in call_queue
         dispatch(PushToVideoCallQueue(data));
       });
 
       socket.on("new_message", (data) => {
         const message = data.message;
         console.log(current_conversation, data);
-        // check if msg we got is from currently selected conversation
         if (current_conversation?.id === data.conversation_id) {
           dispatch(
             AddDirectMessage({
@@ -93,15 +83,12 @@ const DashboardLayout = () => {
 
       socket.on("start_chat", (data) => {
         console.log(data);
-        // add / update to conversation list
         const existing_conversation = conversations.find(
           (el) => el?.id === data._id
         );
         if (existing_conversation) {
-          // update direct conversation
           dispatch(UpdateDirectConversation({ conversation: data }));
         } else {
-          // add direct conversation
           dispatch(AddDirectConversation({ conversation: data }));
         }
         dispatch(SelectConversation({ room_id: data._id }));
@@ -130,7 +117,6 @@ const DashboardLayout = () => {
       });
     }
 
-    // Remove event listener on component unmount
     return () => {
       socket?.off("new_friend_request");
       socket?.off("request_accepted");
@@ -138,13 +124,13 @@ const DashboardLayout = () => {
       socket?.off("start_chat");
       socket?.off("new_message");
       socket?.off("audio_call_notification");
+      socket?.off("video_call_notification");
     };
-  }, [isLoggedIn, socket]);
+  }, [conversations, current_conversation, dispatch, isLoggedIn, token]);
 
-  // Skip authentication for testing
-  // if (!isLoggedIn) {
-  //   return <Navigate to={"/auth/login"} />;
-  // }
+  if (!isLoggedIn) {
+    return <Navigate to={"/auth/login"} />;
+  }
 
   return (
     <>

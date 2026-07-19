@@ -5,11 +5,11 @@ import { enUS, frFR, zhCN, viVN, arSD } from '@mui/material/locale';
 import { PATH_DASHBOARD } from "./routes/paths";
 
 export const BASE_URL = process.env.REACT_APP_API_URL || "";
-
-export const S3_BUCKET_NAME = 'your_s3_bucket_name';
-export const AWS_ACCESS_KEY = 'your_aws_access_key';
-export const AWS_SECRET_ACCESS_KEY = 'your_aws_secret_key';
-export const AWS_S3_REGION = 'your_aws_region'; // eg. ap-south-1
+export const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || undefined;
+export const ZEGO_APP_ID = process.env.REACT_APP_ZEGO_APP_ID
+  ? Number(process.env.REACT_APP_ZEGO_APP_ID)
+  : undefined;
+export const ZEGO_SERVER = process.env.REACT_APP_ZEGO_SERVER || "";
 
 export const defaultSettings = {
   themeMode: "light",

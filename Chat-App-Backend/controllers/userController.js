@@ -1,40 +1,34 @@
 const AudioCall = require("../models/audioCall");
-const FriendRequest = require("../models/friendRequest");
+const Friend = require("../models/Friend");
+const Notification = require("../models/Notification");
 const User = require("../models/user");
 const VideoCall = require("../models/videoCall");
 const catchAsync = require("../utils/catchAsync");
 const filterObj = require("../utils/filterObj");
+const {
+  createSignedUploadUrl,
+  generateObjectKey,
+  getPublicUrl,
+  isStorageConfigured,
+} = require("../services/storage");
 
 const { generateToken04 } = require("./zegoServerAssistant");
 
-// Please change appID to your appId, appid is a number
-// Example: 1234567890
-const appID = process.env.ZEGO_APP_ID; // type: number
+const appID = process.env.ZEGO_APP_ID;
+const serverSecret = process.env.ZEGO_SERVER_SECRET;
 
-// Please change serverSecret to your serverSecret, serverSecret is string
-// Example：'sdfsdfsd323sdfsdf'
-const serverSecret = process.env.ZEGO_SERVER_SECRET; // type: 32 byte length string
-
-exports.getMe = catchAsync(async (req, res, next) => {
-  // Mock user data for testing
-  const mockUser = {
-    _id: req.user._id,
-    firstName: "Test",
-    lastName: "User",
-    email: "test@example.com",
-    avatar: "https://via.placeholder.com/150",
-    about: "Test user for development",
-    verified: true,
-    friends: []
-  };
+exports.getMe = catchAsync(async (req, res) => {
+  const user = await User.findById(req.user._id)
+    .select("firstName lastName email avatar about verified friends status")
+    .populate("friends", "_id firstName lastName avatar status");
 
   res.status(200).json({
     status: "success",
-    data: mockUser,
+    data: user,
   });
 });
 
-exports.updateMe = catchAsync(async (req, res, next) => {
+exports.updateMe = catchAsync(async (req, res) => {
   const filteredBody = filterObj(
     req.body,
     "firstName",
@@ -43,7 +37,10 @@ exports.updateMe = catchAsync(async (req, res, next) => {
     "avatar"
   );
 
-  const userDoc = await User.findByIdAndUpdate(req.user._id, filteredBody);
+  const userDoc = await User.findByIdAndUpdate(req.user._id, filteredBody, {
+    new: true,
+    runValidators: true,
+  }).select("firstName lastName email avatar about verified friends status");
 
   res.status(200).json({
     status: "success",
@@ -52,37 +49,38 @@ exports.updateMe = catchAsync(async (req, res, next) => {
   });
 });
 
-exports.getUsers = catchAsync(async (req, res, next) => {
-  // Mock users data for testing
-  const mockUsers = [
-    {
-      _id: "user1",
-      firstName: "John",
-      lastName: "Doe"
-    },
-    {
-      _id: "user2", 
-      firstName: "Jane",
-      lastName: "Smith"
-    },
-    {
-      _id: "user3",
-      firstName: "Bob",
-      lastName: "Johnson"
-    }
-  ];
+exports.getUsers = catchAsync(async (req, res) => {
+  const currentUser = await User.findById(req.user._id).select("friends");
+  const existingRelations = await Friend.find({
+    $or: [{ requester: req.user._id }, { recipient: req.user._id }],
+  }).select("requester recipient status");
+
+  const excludedIds = new Set([
+    req.user._id.toString(),
+    ...currentUser.friends.map((friendId) => friendId.toString()),
+  ]);
+
+  existingRelations.forEach((relation) => {
+    excludedIds.add(relation.requester.toString());
+    excludedIds.add(relation.recipient.toString());
+  });
+
+  const users = await User.find({
+    verified: true,
+    _id: { $nin: Array.from(excludedIds) },
+  }).select("_id firstName lastName avatar about status");
 
   res.status(200).json({
     status: "success",
-    data: mockUsers,
+    data: users,
     message: "Users found successfully!",
   });
 });
 
-exports.getAllVerifiedUsers = catchAsync(async (req, res, next) => {
+exports.getAllVerifiedUsers = catchAsync(async (req, res) => {
   const all_users = await User.find({
     verified: true,
-  }).select("firstName lastName _id");
+  }).select("firstName lastName _id avatar about status");
 
   const remaining_users = all_users.filter(
     (user) => user._id.toString() !== req.user._id.toString()
@@ -95,10 +93,13 @@ exports.getAllVerifiedUsers = catchAsync(async (req, res, next) => {
   });
 });
 
-exports.getRequests = catchAsync(async (req, res, next) => {
-  const requests = await FriendRequest.find({ recipient: req.user._id })
-    .populate("sender")
-    .select("_id firstName lastName");
+exports.getRequests = catchAsync(async (req, res) => {
+  const requests = await Friend.find({
+    recipient: req.user._id,
+    status: "pending",
+  })
+    .populate("requester", "_id firstName lastName avatar about status")
+    .sort({ createdAt: -1 });
 
   res.status(200).json({
     status: "success",
@@ -107,10 +108,10 @@ exports.getRequests = catchAsync(async (req, res, next) => {
   });
 });
 
-exports.getFriends = catchAsync(async (req, res, next) => {
+exports.getFriends = catchAsync(async (req, res) => {
   const this_user = await User.findById(req.user._id).populate(
     "friends",
-    "_id firstName lastName"
+    "_id firstName lastName avatar about status"
   );
   res.status(200).json({
     status: "success",
@@ -123,27 +124,77 @@ exports.getFriends = catchAsync(async (req, res, next) => {
  * Authorization authentication token generation
  */
 
-exports.generateZegoToken = catchAsync(async (req, res, next) => {
+exports.getNotifications = catchAsync(async (req, res) => {
+  const notifications = await Notification.find({ user: req.user._id })
+    .populate("actor", "_id firstName lastName avatar")
+    .sort({ createdAt: -1 })
+    .limit(50);
+
+  res.status(200).json({
+    status: "success",
+    data: notifications,
+    message: "Notifications found successfully!",
+  });
+});
+
+exports.createUploadSignature = catchAsync(async (req, res) => {
+  const { fileName, contentType, folder } = req.body;
+
+  if (!fileName || !contentType) {
+    return res.status(400).json({
+      status: "error",
+      message: "fileName and contentType are required.",
+    });
+  }
+
+  if (!isStorageConfigured()) {
+    return res.status(503).json({
+      status: "error",
+      message: "S3 upload is not configured on the server.",
+    });
+  }
+
+  const key = generateObjectKey({
+    folder: folder || "uploads",
+    fileName,
+    userId: req.user._id.toString(),
+  });
+
+  const signedUpload = await createSignedUploadUrl({
+    key,
+    contentType,
+  });
+
+  res.status(200).json({
+    status: "success",
+    data: signedUpload,
+  });
+});
+
+exports.generateZegoToken = catchAsync(async (req, res) => {
   try {
-    const { userId, room_id } = req.body;
+    const { room_id } = req.body;
+    const userId = String(req.user._id);
 
-    console.log(userId, room_id, "from generate zego token");
+    if (!appID || !serverSecret) {
+      return res.status(503).json({
+        status: "error",
+        message: "Zego environment variables are not configured.",
+      });
+    }
 
-    const effectiveTimeInSeconds = 3600; //type: number; unit: s; token expiration time, unit: second
+    const effectiveTimeInSeconds = 3600;
     const payloadObject = {
-      room_id, // Please modify to the user's roomID
-      // The token generated allows loginRoom (login room) action
-      // The token generated in this example allows publishStream (push stream) action
+      room_id,
       privilege: {
-        1: 1, // loginRoom: 1 pass , 0 not pass
-        2: 1, // publishStream: 1 pass , 0 not pass
+        1: 1,
+        2: 1,
       },
       stream_id_list: null,
-    }; //
+    };
     const payload = JSON.stringify(payloadObject);
-    // Build token
     const token = generateToken04(
-      appID * 1, // APP ID NEEDS TO BE A NUMBER
+      appID * 1,
       userId,
       serverSecret,
       effectiveTimeInSeconds,
@@ -156,17 +207,20 @@ exports.generateZegoToken = catchAsync(async (req, res, next) => {
     });
   } catch (err) {
     console.log(err);
+    return res.status(500).json({
+      status: "error",
+      message: "Unable to generate Zego token.",
+    });
   }
 });
 
-exports.startAudioCall = catchAsync(async (req, res, next) => {
+exports.startAudioCall = catchAsync(async (req, res) => {
   const from = req.user._id;
   const to = req.body.id;
 
-  const from_user = await User.findById(from);
   const to_user = await User.findById(to);
+  const from_user = await User.findById(from);
 
-  // create a new call audioCall Doc and send required data to client
   const new_audio_call = await AudioCall.create({
     participants: [from, to],
     from,
@@ -177,22 +231,23 @@ exports.startAudioCall = catchAsync(async (req, res, next) => {
   res.status(200).json({
     data: {
       from: to_user,
+      from_user,
       roomID: new_audio_call._id,
-      streamID: to,
+      streamID: from,
+      recipientID: to,
       userID: from,
-      userName: from,
+      userName: `${from_user.firstName} ${from_user.lastName}`.trim(),
     },
   });
 });
 
-exports.startVideoCall = catchAsync(async (req, res, next) => {
+exports.startVideoCall = catchAsync(async (req, res) => {
   const from = req.user._id;
   const to = req.body.id;
 
-  const from_user = await User.findById(from);
   const to_user = await User.findById(to);
+  const from_user = await User.findById(from);
 
-  // create a new call videoCall Doc and send required data to client
   const new_video_call = await VideoCall.create({
     participants: [from, to],
     from,
@@ -203,15 +258,17 @@ exports.startVideoCall = catchAsync(async (req, res, next) => {
   res.status(200).json({
     data: {
       from: to_user,
+      from_user,
       roomID: new_video_call._id,
-      streamID: to,
+      streamID: from,
+      recipientID: to,
       userID: from,
-      userName: from,
+      userName: `${from_user.firstName} ${from_user.lastName}`.trim(),
     },
   });
 });
 
-exports.getCallLogs = catchAsync(async (req, res, next) => {
+exports.getCallLogs = catchAsync(async (req, res) => {
   const user_id = req.user._id;
 
   const call_logs = [];
@@ -234,9 +291,9 @@ exports.getCallLogs = catchAsync(async (req, res, next) => {
       // outgoing
       call_logs.push({
         id: elm._id,
-        img: other_user.avatar,
+        img: getPublicUrl(other_user.avatar),
         name: other_user.firstName,
-        online: true,
+        online: other_user.status === "Online",
         incoming: false,
         missed,
       });
@@ -247,10 +304,10 @@ exports.getCallLogs = catchAsync(async (req, res, next) => {
       // outgoing
       call_logs.push({
         id: elm._id,
-        img: other_user.avatar,
+        img: getPublicUrl(other_user.avatar),
         name: other_user.firstName,
-        online: true,
-        incoming: false,
+        online: other_user.status === "Online",
+        incoming: true,
         missed,
       });
     }
@@ -264,9 +321,9 @@ exports.getCallLogs = catchAsync(async (req, res, next) => {
       // outgoing
       call_logs.push({
         id: element._id,
-        img: other_user.avatar,
+        img: getPublicUrl(other_user.avatar),
         name: other_user.firstName,
-        online: true,
+        online: other_user.status === "Online",
         incoming: false,
         missed,
       });
@@ -277,10 +334,10 @@ exports.getCallLogs = catchAsync(async (req, res, next) => {
       // outgoing
       call_logs.push({
         id: element._id,
-        img: other_user.avatar,
+        img: getPublicUrl(other_user.avatar),
         name: other_user.firstName,
-        online: true,
-        incoming: false,
+        online: other_user.status === "Online",
+        incoming: true,
         missed,
       });
     }

@@ -1,12 +1,13 @@
-import io from "socket.io-client"; // Add this
+import io from "socket.io-client";
+import { SOCKET_URL } from "./config";
 
 let socket;
-const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || undefined;
 
-const connectSocket = (user_id) => {
+const connectSocket = (token) => {
   socket = io(SOCKET_URL, {
-    query: { user_id },
+    auth: { token },
+    autoConnect: true,
   });
-} // Add this -- our server will run on port 4000, so we connect to it from here
+};
 
-export {socket, connectSocket};
+export { socket, connectSocket };

@@ -1,475 +1,639 @@
 const mongoose = require("mongoose");
 const dotenv = require("dotenv");
 const path = require("path");
+const http = require("http");
+const jwt = require("jsonwebtoken");
+const { Server } = require("socket.io");
 
 dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
 
 process.on("uncaughtException", (err) => {
   console.log(err);
   console.log("UNCAUGHT Exception! Shutting down ...");
-  process.exit(1); // Exit Code 1 indicates that a container shut down, either because of an application failure.
+  process.exit(1);
 });
 
 const app = require("./app");
-
-const http = require("http");
-const server = http.createServer(app);
-
-const { Server } = require("socket.io"); // Add this
 const User = require("./models/user");
-const FriendRequest = require("./models/friendRequest");
-const OneToOneMessage = require("./models/OneToOneMessage");
+const Friend = require("./models/Friend");
+const Conversation = require("./models/Conversation");
+const Message = require("./models/Message");
+const Notification = require("./models/Notification");
 const AudioCall = require("./models/audioCall");
 const VideoCall = require("./models/videoCall");
+const { parseAllowedOrigins, validateEnvironment } = require("./utils/env");
 
-const socketCors = {
-  methods: ["GET", "POST"],
-};
+validateEnvironment();
 
-if (process.env.CLIENT_URL) {
-  socketCors.origin = process.env.CLIENT_URL;
-}
+const server = http.createServer(app);
+const allowedOrigins = parseAllowedOrigins(
+  process.env.CORS_ALLOWED_ORIGINS || process.env.CLIENT_URL || ""
+);
 
 const io = new Server(server, {
-  cors: socketCors,
+  cors: {
+    origin: allowedOrigins.length > 0 ? allowedOrigins : true,
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+});
+
+const emitUserStatus = (userId, status) => {
+  io.emit("user_status_changed", { user_id: userId, status });
+};
+
+const emitNotification = (userId, payload) => {
+  io.to(`user:${userId}`).emit("notification:new", payload);
+};
+
+const mapConversation = async (conversationId) => {
+  const conversation = await Conversation.findById(conversationId)
+    .populate("participants", "firstName lastName avatar _id email status about")
+    .populate("lastMessage");
+
+  if (!conversation) {
+    return null;
+  }
+
+  const messages = conversation.lastMessage ? [conversation.lastMessage] : [];
+
+  return {
+    ...conversation.toObject(),
+    messages,
+  };
+};
+
+const createMessageRecord = async ({
+  conversationId,
+  from,
+  to,
+  type,
+  text = "",
+  file = "",
+  fileName = "",
+  mimeType = "",
+  size = 0,
+}) => {
+  const messageDoc = await Message.create({
+    conversation: conversationId,
+    from,
+    to,
+    type,
+    text,
+    file,
+    fileName,
+    mimeType,
+    size,
+  });
+
+  await Conversation.findByIdAndUpdate(conversationId, {
+    lastMessage: messageDoc._id,
+    lastMessageText: text || fileName || type,
+    lastMessageType: type,
+    lastMessageAt: messageDoc.created_at,
+  });
+
+  return messageDoc;
+};
+
+io.use(async (socket, next) => {
+  try {
+    const token =
+      socket.handshake.auth?.token ||
+      socket.handshake.query?.token ||
+      socket.handshake.headers?.authorization?.replace(/^Bearer\s+/i, "");
+
+    if (!token) {
+      return next(new Error("Authentication token is required."));
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.userId);
+
+    if (!user) {
+      return next(new Error("User not found."));
+    }
+
+    socket.data.user = user;
+    return next();
+  } catch (error) {
+    return next(new Error("Authentication failed."));
+  }
+});
+
+io.on("connection", async (socket) => {
+  const user = socket.data.user;
+  const userId = user._id.toString();
+
+  await User.findByIdAndUpdate(userId, {
+    socket_id: socket.id,
+    status: "Online",
+  });
+
+  socket.join(`user:${userId}`);
+  emitUserStatus(userId, "Online");
+
+  socket.on("friend_request", async (data) => {
+    try {
+      const recipientId = String(data.to || "");
+      if (!recipientId || recipientId === userId) {
+        return;
+      }
+
+      const existingRelation = await Friend.findOne({
+        $or: [
+          { requester: userId, recipient: recipientId },
+          { requester: recipientId, recipient: userId },
+        ],
+      });
+
+      if (existingRelation) {
+        socket.emit("request_sent", {
+          message: "Friend request already exists.",
+        });
+        return;
+      }
+
+      const request = await Friend.create({
+        requester: userId,
+        recipient: recipientId,
+        status: "pending",
+      });
+
+      const notification = await Notification.create({
+        user: recipientId,
+        actor: userId,
+        type: "friend_request",
+        title: "New friend request",
+        body: `${user.firstName} ${user.lastName} sent you a friend request.`,
+        metadata: { requestId: request._id },
+      });
+
+      io.to(`user:${recipientId}`).emit("new_friend_request", {
+        message: "New friend request received",
+        request_id: request._id,
+      });
+      emitNotification(recipientId, notification);
+      socket.emit("request_sent", {
+        message: "Request Sent successfully!",
+      });
+    } catch (error) {
+      console.log(error);
+    }
+  });
+
+  socket.on("accept_request", async (data) => {
+    try {
+      const requestDoc = await Friend.findOne({
+        _id: data.request_id,
+        recipient: userId,
+        status: "pending",
+      });
+
+      if (!requestDoc) {
+        return;
+      }
+
+      requestDoc.status = "accepted";
+      requestDoc.acceptedAt = new Date();
+      await requestDoc.save();
+
+      await User.findByIdAndUpdate(requestDoc.requester, {
+        $addToSet: { friends: requestDoc.recipient },
+      });
+      await User.findByIdAndUpdate(requestDoc.recipient, {
+        $addToSet: { friends: requestDoc.requester },
+      });
+
+      const notification = await Notification.create({
+        user: requestDoc.requester,
+        actor: userId,
+        type: "friend_request_accepted",
+        title: "Friend request accepted",
+        body: `${user.firstName} ${user.lastName} accepted your friend request.`,
+        metadata: { requestId: requestDoc._id },
+      });
+
+      io.to(`user:${requestDoc.requester}`).emit("request_accepted", {
+        message: "Friend Request Accepted",
+      });
+      io.to(`user:${requestDoc.recipient}`).emit("request_accepted", {
+        message: "Friend Request Accepted",
+      });
+      emitNotification(requestDoc.requester.toString(), notification);
+    } catch (error) {
+      console.log(error);
+    }
+  });
+
+  socket.on("get_direct_conversations", async (_payload, callback) => {
+    try {
+      const conversations = await Conversation.find({
+        participants: { $all: [userId] },
+      })
+        .sort({ lastMessageAt: -1 })
+        .populate("participants", "firstName lastName avatar _id email status about")
+        .populate("lastMessage");
+
+      const formatted = conversations.map((conversation) => ({
+        ...conversation.toObject(),
+        messages: conversation.lastMessage ? [conversation.lastMessage] : [],
+      }));
+
+      callback(formatted);
+    } catch (error) {
+      console.log(error);
+      callback([]);
+    }
+  });
+
+  socket.on("start_conversation", async (data) => {
+    try {
+      const to = String(data.to || "");
+
+      if (!to || to === userId) {
+        return;
+      }
+
+      let conversation = await Conversation.findOne({
+        participants: { $size: 2, $all: [to, userId] },
+      });
+
+      if (!conversation) {
+        conversation = await Conversation.create({
+          participants: [to, userId],
+        });
+      }
+
+      const mappedConversation = await mapConversation(conversation._id);
+      socket.emit("start_chat", mappedConversation);
+    } catch (error) {
+      console.log(error);
+    }
+  });
+
+  socket.on("get_messages", async (data, callback) => {
+    try {
+      const conversationId = data.conversation_id;
+      const messages = await Message.find({
+        conversation: conversationId,
+      }).sort({ created_at: 1 });
+
+      callback(messages);
+    } catch (error) {
+      console.log(error);
+      callback([]);
+    }
+  });
+
+  socket.on("typing_start", async ({ to, conversation_id }) => {
+    io.to(`user:${to}`).emit("typing_start", {
+      conversation_id,
+      from: userId,
+    });
+  });
+
+  socket.on("typing_stop", async ({ to, conversation_id }) => {
+    io.to(`user:${to}`).emit("typing_stop", {
+      conversation_id,
+      from: userId,
+    });
+  });
+
+  socket.on("text_message", async (data) => {
+    try {
+      const { message, conversation_id, to, type } = data;
+
+      const conversation = await Conversation.findOne({
+        _id: conversation_id,
+        participants: { $all: [userId, to] },
+      });
+
+      if (!conversation) {
+        return;
+      }
+
+      const newMessage = await createMessageRecord({
+        conversationId: conversation_id,
+        from: userId,
+        to,
+        type: type || "Text",
+        text: message,
+      });
+
+      const notification = await Notification.create({
+        user: to,
+        actor: userId,
+        conversation: conversation_id,
+        message: newMessage._id,
+        type: "message",
+        title: "New message",
+        body: message,
+      });
+
+      io.to(`user:${to}`).emit("new_message", {
+        conversation_id,
+        message: newMessage,
+      });
+
+      io.to(`user:${userId}`).emit("new_message", {
+        conversation_id,
+        message: newMessage,
+      });
+
+      emitNotification(to, notification);
+    } catch (error) {
+      console.log(error);
+    }
+  });
+
+  socket.on("file_message", async (data) => {
+    try {
+      const { conversation_id, to, type, text, file, fileName, mimeType, size } = data;
+
+      const conversation = await Conversation.findOne({
+        _id: conversation_id,
+        participants: { $all: [userId, to] },
+      });
+
+      if (!conversation) {
+        return;
+      }
+
+      const newMessage = await createMessageRecord({
+        conversationId: conversation_id,
+        from: userId,
+        to,
+        type: type || "Document",
+        text: text || "",
+        file,
+        fileName,
+        mimeType,
+        size,
+      });
+
+      const notification = await Notification.create({
+        user: to,
+        actor: userId,
+        conversation: conversation_id,
+        message: newMessage._id,
+        type: "message",
+        title: "New file received",
+        body: fileName || "File attachment",
+      });
+
+      io.to(`user:${to}`).emit("new_message", {
+        conversation_id,
+        message: newMessage,
+      });
+      io.to(`user:${userId}`).emit("new_message", {
+        conversation_id,
+        message: newMessage,
+      });
+      emitNotification(to, notification);
+    } catch (error) {
+      console.log(error);
+    }
+  });
+
+  socket.on("start_audio_call", async (data) => {
+    try {
+      const { to, roomID } = data;
+      const toUser = await User.findById(to);
+      const fromUser = await User.findById(userId);
+
+      if (!toUser) {
+        return;
+      }
+
+      const notification = await Notification.create({
+        user: to,
+        actor: userId,
+        type: "audio_call",
+        title: "Incoming audio call",
+        body: `${fromUser.firstName} ${fromUser.lastName} is calling you.`,
+        metadata: { roomID },
+      });
+
+      io.to(`user:${to}`).emit("audio_call_notification", {
+        from_user: fromUser,
+        roomID,
+        streamID: userId,
+        recipientID: userId,
+        userID: to,
+        userName: `${toUser.firstName} ${toUser.lastName}`.trim(),
+        from: to,
+        to: userId,
+      });
+      emitNotification(to, notification);
+    } catch (error) {
+      console.log(error);
+    }
+  });
+
+  socket.on("audio_call_not_picked", async (data) => {
+    try {
+      const { to, from } = data;
+      await AudioCall.findOneAndUpdate(
+        {
+          participants: { $size: 2, $all: [to, from] },
+        },
+        { verdict: "Missed", status: "Ended", endedAt: Date.now() }
+      );
+
+      io.to(`user:${to}`).emit("audio_call_missed", { from, to });
+    } catch (error) {
+      console.log(error);
+    }
+  });
+
+  socket.on("audio_call_accepted", async (data) => {
+    try {
+      const { to, from } = data;
+      await AudioCall.findOneAndUpdate(
+        {
+          participants: { $size: 2, $all: [to, from] },
+        },
+        { verdict: "Accepted" }
+      );
+
+      io.to(`user:${to}`).emit("audio_call_accepted", { from, to });
+    } catch (error) {
+      console.log(error);
+    }
+  });
+
+  socket.on("audio_call_denied", async (data) => {
+    try {
+      const { to, from } = data;
+      await AudioCall.findOneAndUpdate(
+        {
+          participants: { $size: 2, $all: [to, from] },
+        },
+        { verdict: "Denied", status: "Ended", endedAt: Date.now() }
+      );
+
+      io.to(`user:${to}`).emit("audio_call_denied", { from, to });
+    } catch (error) {
+      console.log(error);
+    }
+  });
+
+  socket.on("user_is_busy_audio_call", async (data) => {
+    try {
+      const { to, from } = data;
+      await AudioCall.findOneAndUpdate(
+        {
+          participants: { $size: 2, $all: [to, from] },
+        },
+        { verdict: "Busy", status: "Ended", endedAt: Date.now() }
+      );
+
+      io.to(`user:${to}`).emit("on_another_audio_call", { from, to });
+    } catch (error) {
+      console.log(error);
+    }
+  });
+
+  socket.on("start_video_call", async (data) => {
+    try {
+      const { to, roomID } = data;
+      const toUser = await User.findById(to);
+      const fromUser = await User.findById(userId);
+
+      if (!toUser) {
+        return;
+      }
+
+      const notification = await Notification.create({
+        user: to,
+        actor: userId,
+        type: "video_call",
+        title: "Incoming video call",
+        body: `${fromUser.firstName} ${fromUser.lastName} is calling you.`,
+        metadata: { roomID },
+      });
+
+      io.to(`user:${to}`).emit("video_call_notification", {
+        from_user: fromUser,
+        roomID,
+        streamID: userId,
+        recipientID: userId,
+        userID: to,
+        userName: `${toUser.firstName} ${toUser.lastName}`.trim(),
+        from: to,
+        to: userId,
+      });
+      emitNotification(to, notification);
+    } catch (error) {
+      console.log(error);
+    }
+  });
+
+  socket.on("video_call_not_picked", async (data) => {
+    try {
+      const { to, from } = data;
+      await VideoCall.findOneAndUpdate(
+        {
+          participants: { $size: 2, $all: [to, from] },
+        },
+        { verdict: "Missed", status: "Ended", endedAt: Date.now() }
+      );
+
+      io.to(`user:${to}`).emit("video_call_missed", { from, to });
+    } catch (error) {
+      console.log(error);
+    }
+  });
+
+  socket.on("video_call_accepted", async (data) => {
+    try {
+      const { to, from } = data;
+      await VideoCall.findOneAndUpdate(
+        {
+          participants: { $size: 2, $all: [to, from] },
+        },
+        { verdict: "Accepted" }
+      );
+
+      io.to(`user:${to}`).emit("video_call_accepted", { from, to });
+    } catch (error) {
+      console.log(error);
+    }
+  });
+
+  socket.on("video_call_denied", async (data) => {
+    try {
+      const { to, from } = data;
+      await VideoCall.findOneAndUpdate(
+        {
+          participants: { $size: 2, $all: [to, from] },
+        },
+        { verdict: "Denied", status: "Ended", endedAt: Date.now() }
+      );
+
+      io.to(`user:${to}`).emit("video_call_denied", { from, to });
+    } catch (error) {
+      console.log(error);
+    }
+  });
+
+  socket.on("user_is_busy_video_call", async (data) => {
+    try {
+      const { to, from } = data;
+      await VideoCall.findOneAndUpdate(
+        {
+          participants: { $size: 2, $all: [to, from] },
+        },
+        { verdict: "Busy", status: "Ended", endedAt: Date.now() }
+      );
+
+      io.to(`user:${to}`).emit("on_another_video_call", { from, to });
+    } catch (error) {
+      console.log(error);
+    }
+  });
+
+  socket.on("end", async () => {
+    await User.findByIdAndUpdate(userId, { status: "Offline", socket_id: "" });
+    emitUserStatus(userId, "Offline");
+    socket.disconnect(true);
+  });
+
+  socket.on("disconnect", async () => {
+    await User.findByIdAndUpdate(userId, { status: "Offline", socket_id: "" });
+    emitUserStatus(userId, "Offline");
+  });
 });
 
 const DB = process.env.DATABASE;
+const port = process.env.PORT || 8000;
 
 mongoose
   .connect(DB)
   .then(() => {
     console.log("DB Connection successful");
+    server.listen(port, () => {
+      console.log(`App running on port ${port} ...`);
+    });
   })
   .catch((err) => {
     console.log("DB Connection failed:", err.message);
     process.exit(1);
   });
 
-const port = process.env.PORT || 8000;
-
-server.listen(port, () => {
-  console.log(`App running on port ${port} ...`);
-});
-
-// Add this
-// Listen for when the client connects via socket.io-client
-io.on("connection", async (socket) => {
-  console.log(JSON.stringify(socket.handshake.query));
-  const user_id = socket.handshake.query["user_id"];
-
-  console.log(`User connected ${socket.id}`);
-
-  if (user_id != null && Boolean(user_id)) {
-    try {
-      User.findByIdAndUpdate(user_id, {
-        socket_id: socket.id,
-        status: "Online",
-      });
-    } catch (e) {
-      console.log(e);
-    }
-  }
-
-  // We can write our socket event listeners in here...
-  socket.on("friend_request", async (data) => {
-    const to = await User.findById(data.to).select("socket_id");
-    const from = await User.findById(data.from).select("socket_id");
-
-    // create a friend request
-    await FriendRequest.create({
-      sender: data.from,
-      recipient: data.to,
-    });
-    // emit event request received to recipient
-    io.to(to?.socket_id).emit("new_friend_request", {
-      message: "New friend request received",
-    });
-    io.to(from?.socket_id).emit("request_sent", {
-      message: "Request Sent successfully!",
-    });
+const gracefulShutdown = async (signal) => {
+  console.log(`${signal} received. Shutting down gracefully...`);
+  server.close(async () => {
+    await mongoose.connection.close();
+    process.exit(0);
   });
+};
 
-  socket.on("accept_request", async (data) => {
-    // accept friend request => add ref of each other in friends array
-    console.log(data);
-    const request_doc = await FriendRequest.findById(data.request_id);
-
-    console.log(request_doc);
-
-    const sender = await User.findById(request_doc.sender);
-    const receiver = await User.findById(request_doc.recipient);
-
-    sender.friends.push(request_doc.recipient);
-    receiver.friends.push(request_doc.sender);
-
-    await receiver.save({ new: true, validateModifiedOnly: true });
-    await sender.save({ new: true, validateModifiedOnly: true });
-
-    await FriendRequest.findByIdAndDelete(data.request_id);
-
-    // delete this request doc
-    // emit event to both of them
-
-    // emit event request accepted to both
-    io.to(sender?.socket_id).emit("request_accepted", {
-      message: "Friend Request Accepted",
-    });
-    io.to(receiver?.socket_id).emit("request_accepted", {
-      message: "Friend Request Accepted",
-    });
-  });
-
-  socket.on("get_direct_conversations", async ({ user_id }, callback) => {
-    const existing_conversations = await OneToOneMessage.find({
-      participants: { $all: [user_id] },
-    }).populate("participants", "firstName lastName avatar _id email status");
-
-    // db.books.find({ authors: { $elemMatch: { name: "John Smith" } } })
-
-    console.log(existing_conversations);
-
-    callback(existing_conversations);
-  });
-
-  socket.on("start_conversation", async (data) => {
-    // data: {to: from:}
-
-    const { to, from } = data;
-
-    // check if there is any existing conversation
-
-    const existing_conversations = await OneToOneMessage.find({
-      participants: { $size: 2, $all: [to, from] },
-    }).populate("participants", "firstName lastName _id email status");
-
-    console.log(existing_conversations[0], "Existing Conversation");
-
-    // if no => create a new OneToOneMessage doc & emit event "start_chat" & send conversation details as payload
-    if (existing_conversations.length === 0) {
-      let new_chat = await OneToOneMessage.create({
-        participants: [to, from],
-      });
-
-      new_chat = await OneToOneMessage.findById(new_chat).populate(
-        "participants",
-        "firstName lastName _id email status"
-      );
-
-      console.log(new_chat);
-
-      socket.emit("start_chat", new_chat);
-    }
-    // if yes => just emit event "start_chat" & send conversation details as payload
-    else {
-      socket.emit("start_chat", existing_conversations[0]);
-    }
-  });
-
-  socket.on("get_messages", async (data, callback) => {
-    try {
-      const { messages } = await OneToOneMessage.findById(
-        data.conversation_id
-      ).select("messages");
-      callback(messages);
-    } catch (error) {
-      console.log(error);
-    }
-  });
-
-  // Handle incoming text/link messages
-  socket.on("text_message", async (data) => {
-    console.log("Received message:", data);
-
-    // data: {to, from, text}
-
-    const { message, conversation_id, from, to, type } = data;
-
-    const to_user = await User.findById(to);
-    const from_user = await User.findById(from);
-
-    // message => {to, from, type, created_at, text, file}
-
-    const new_message = {
-      to: to,
-      from: from,
-      type: type,
-      created_at: Date.now(),
-      text: message,
-    };
-
-    // fetch OneToOneMessage Doc & push a new message to existing conversation
-    const chat = await OneToOneMessage.findById(conversation_id);
-    chat.messages.push(new_message);
-    // save to db`
-    await chat.save({ new: true, validateModifiedOnly: true });
-
-    // emit incoming_message -> to user
-
-    io.to(to_user?.socket_id).emit("new_message", {
-      conversation_id,
-      message: new_message,
-    });
-
-    // emit outgoing_message -> from user
-    io.to(from_user?.socket_id).emit("new_message", {
-      conversation_id,
-      message: new_message,
-    });
-  });
-
-  // handle Media/Document Message
-  socket.on("file_message", (data) => {
-    console.log("Received message:", data);
-
-    // data: {to, from, text, file}
-
-    // Get the file extension
-    const fileExtension = path.extname(data.file.name);
-
-    // Generate a unique filename
-    const filename = `${Date.now()}_${Math.floor(
-      Math.random() * 10000
-    )}${fileExtension}`;
-
-    // upload file to AWS s3
-
-    // create a new conversation if its dosent exists yet or add a new message to existing conversation
-
-    // save to db
-
-    // emit incoming_message -> to user
-
-    // emit outgoing_message -> from user
-  });
-
-  // -------------- HANDLE AUDIO CALL SOCKET EVENTS ----------------- //
-
-  // handle start_audio_call event
-  socket.on("start_audio_call", async (data) => {
-    const { from, to, roomID } = data;
-
-    const to_user = await User.findById(to);
-    const from_user = await User.findById(from);
-
-    console.log("to_user", to_user);
-
-    // send notification to receiver of call
-    io.to(to_user?.socket_id).emit("audio_call_notification", {
-      from: from_user,
-      roomID,
-      streamID: from,
-      userID: to,
-      userName: to,
-    });
-  });
-
-  // handle audio_call_not_picked
-  socket.on("audio_call_not_picked", async (data) => {
-    console.log(data);
-    // find and update call record
-    const { to, from } = data;
-
-    const to_user = await User.findById(to);
-
-    await AudioCall.findOneAndUpdate(
-      {
-        participants: { $size: 2, $all: [to, from] },
-      },
-      { verdict: "Missed", status: "Ended", endedAt: Date.now() }
-    );
-
-    // TODO => emit call_missed to receiver of call
-    io.to(to_user?.socket_id).emit("audio_call_missed", {
-      from,
-      to,
-    });
-  });
-
-  // handle audio_call_accepted
-  socket.on("audio_call_accepted", async (data) => {
-    const { to, from } = data;
-
-    const from_user = await User.findById(from);
-
-    // find and update call record
-    await AudioCall.findOneAndUpdate(
-      {
-        participants: { $size: 2, $all: [to, from] },
-      },
-      { verdict: "Accepted" }
-    );
-
-    // TODO => emit call_accepted to sender of call
-    io.to(from_user?.socket_id).emit("audio_call_accepted", {
-      from,
-      to,
-    });
-  });
-
-  // handle audio_call_denied
-  socket.on("audio_call_denied", async (data) => {
-    // find and update call record
-    const { to, from } = data;
-
-    await AudioCall.findOneAndUpdate(
-      {
-        participants: { $size: 2, $all: [to, from] },
-      },
-      { verdict: "Denied", status: "Ended", endedAt: Date.now() }
-    );
-
-    const from_user = await User.findById(from);
-    // TODO => emit call_denied to sender of call
-
-    io.to(from_user?.socket_id).emit("audio_call_denied", {
-      from,
-      to,
-    });
-  });
-
-  // handle user_is_busy_audio_call
-  socket.on("user_is_busy_audio_call", async (data) => {
-    const { to, from } = data;
-    // find and update call record
-    await AudioCall.findOneAndUpdate(
-      {
-        participants: { $size: 2, $all: [to, from] },
-      },
-      { verdict: "Busy", status: "Ended", endedAt: Date.now() }
-    );
-
-    const from_user = await User.findById(from);
-    // TODO => emit on_another_audio_call to sender of call
-    io.to(from_user?.socket_id).emit("on_another_audio_call", {
-      from,
-      to,
-    });
-  });
-
-  // --------------------- HANDLE VIDEO CALL SOCKET EVENTS ---------------------- //
-
-  // handle start_video_call event
-  socket.on("start_video_call", async (data) => {
-    const { from, to, roomID } = data;
-
-    console.log(data);
-
-    const to_user = await User.findById(to);
-    const from_user = await User.findById(from);
-
-    console.log("to_user", to_user);
-
-    // send notification to receiver of call
-    io.to(to_user?.socket_id).emit("video_call_notification", {
-      from: from_user,
-      roomID,
-      streamID: from,
-      userID: to,
-      userName: to,
-    });
-  });
-
-  // handle video_call_not_picked
-  socket.on("video_call_not_picked", async (data) => {
-    console.log(data);
-    // find and update call record
-    const { to, from } = data;
-
-    const to_user = await User.findById(to);
-
-    await VideoCall.findOneAndUpdate(
-      {
-        participants: { $size: 2, $all: [to, from] },
-      },
-      { verdict: "Missed", status: "Ended", endedAt: Date.now() }
-    );
-
-    // TODO => emit call_missed to receiver of call
-    io.to(to_user?.socket_id).emit("video_call_missed", {
-      from,
-      to,
-    });
-  });
-
-  // handle video_call_accepted
-  socket.on("video_call_accepted", async (data) => {
-    const { to, from } = data;
-
-    const from_user = await User.findById(from);
-
-    // find and update call record
-    await VideoCall.findOneAndUpdate(
-      {
-        participants: { $size: 2, $all: [to, from] },
-      },
-      { verdict: "Accepted" }
-    );
-
-    // TODO => emit call_accepted to sender of call
-    io.to(from_user?.socket_id).emit("video_call_accepted", {
-      from,
-      to,
-    });
-  });
-
-  // handle video_call_denied
-  socket.on("video_call_denied", async (data) => {
-    // find and update call record
-    const { to, from } = data;
-
-    await VideoCall.findOneAndUpdate(
-      {
-        participants: { $size: 2, $all: [to, from] },
-      },
-      { verdict: "Denied", status: "Ended", endedAt: Date.now() }
-    );
-
-    const from_user = await User.findById(from);
-    // TODO => emit call_denied to sender of call
-
-    io.to(from_user?.socket_id).emit("video_call_denied", {
-      from,
-      to,
-    });
-  });
-
-  // handle user_is_busy_video_call
-  socket.on("user_is_busy_video_call", async (data) => {
-    const { to, from } = data;
-    // find and update call record
-    await VideoCall.findOneAndUpdate(
-      {
-        participants: { $size: 2, $all: [to, from] },
-      },
-      { verdict: "Busy", status: "Ended", endedAt: Date.now() }
-    );
-
-    const from_user = await User.findById(from);
-    // TODO => emit on_another_video_call to sender of call
-    io.to(from_user?.socket_id).emit("on_another_video_call", {
-      from,
-      to,
-    });
-  });
-
-  // -------------- HANDLE SOCKET DISCONNECTION ----------------- //
-
-  socket.on("end", async (data) => {
-    // Find user by ID and set status as offline
-
-    if (data.user_id) {
-      await User.findByIdAndUpdate(data.user_id, { status: "Offline" });
-    }
-
-    // broadcast to all conversation rooms of this user that this user is offline (disconnected)
-
-    console.log("closing connection");
-    socket.disconnect(0);
-  });
-});
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 
 process.on("unhandledRejection", (err) => {
   console.log("Unhandled rejection:", err.message);
-  console.log("Server will continue running...");
+  gracefulShutdown("unhandledRejection");
 });

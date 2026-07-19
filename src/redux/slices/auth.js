@@ -2,16 +2,25 @@ import { createSlice } from "@reduxjs/toolkit";
 
 import axios from "../../utils/axios";
 import { showSnackbar } from "./app";
+import { setSession } from "../../utils/jwt";
 
 // ----------------------------------------------------------------------
 
+const storedToken = window.localStorage.getItem("accessToken") || "";
+const storedUserId = window.localStorage.getItem("user_id");
+const storedEmail = window.localStorage.getItem("register_email") || "";
+
+if (storedToken) {
+  setSession(storedToken);
+}
+
 const initialState = {
-  isLoggedIn: true, // Skip authentication - set to true by default
-  token: "mock_token_123",
+  isLoggedIn: Boolean(storedToken && storedUserId),
+  token: storedToken,
   isLoading: false,
   user: null,
-  user_id: "mock_user_id_123",
-  email: "test@example.com",
+  user_id: storedUserId,
+  email: storedEmail,
   error: false,
 };
 
@@ -27,6 +36,7 @@ const slice = createSlice({
       state.isLoggedIn = action.payload.isLoggedIn;
       state.token = action.payload.token;
       state.user_id = action.payload.user_id;
+      state.email = action.payload.email || state.email;
     },
     signOut(state, action) {
       state.isLoggedIn = false;
@@ -60,10 +70,13 @@ export function NewPassword(formValues) {
       )
       .then(function (response) {
         console.log(response);
+        setSession(response.data.token);
+        window.localStorage.setItem("user_id", response.data.user_id);
         dispatch(
             slice.actions.logIn({
               isLoggedIn: true,
               token: response.data.token,
+              user_id: response.data.user_id,
             })
           );
         dispatch(
@@ -139,11 +152,13 @@ export function LoginUser(formValues) {
       )
       .then(function (response) {
         console.log(response);
+        setSession(response.data.token);
         dispatch(
           slice.actions.logIn({
             isLoggedIn: true,
             token: response.data.token,
             user_id: response.data.user_id,
+            email: formValues.email,
           })
         );
         window.localStorage.setItem("user_id", response.data.user_id);
@@ -167,6 +182,8 @@ export function LoginUser(formValues) {
 export function LogoutUser() {
   return async (dispatch, getState) => {
     window.localStorage.removeItem("user_id");
+    window.localStorage.removeItem("register_email");
+    setSession(null);
     dispatch(slice.actions.signOut());
   };
 }
@@ -189,13 +206,24 @@ export function RegisterUser(formValues) {
       )
       .then(function (response) {
         console.log(response);
-        dispatch(
-          slice.actions.updateRegisterEmail({ email: formValues.email })
-        );
+        window.localStorage.setItem("register_email", formValues.email);
+        dispatch(slice.actions.updateRegisterEmail({ email: formValues.email }));
 
         dispatch(
           showSnackbar({ severity: "success", message: response.data.message })
         );
+        if (response.data.token) {
+          setSession(response.data.token);
+          window.localStorage.setItem("user_id", response.data.user_id);
+          dispatch(
+            slice.actions.logIn({
+              isLoggedIn: true,
+              token: response.data.token,
+              user_id: response.data.user_id,
+              email: formValues.email,
+            })
+          );
+        }
         dispatch(
           slice.actions.updateIsLoading({ isLoading: false, error: false })
         );
@@ -209,7 +237,7 @@ export function RegisterUser(formValues) {
       })
       .finally(() => {
         if (!getState().auth.error) {
-          window.location.href = "/auth/verify";
+          window.location.href = getState().auth.isLoggedIn ? "/" : "/auth/verify";
         }
       });
   };
@@ -233,12 +261,15 @@ export function VerifyEmail(formValues) {
       )
       .then(function (response) {
         console.log(response);
+        setSession(response.data.token);
         dispatch(slice.actions.updateRegisterEmail({ email: "" }));
+        window.localStorage.removeItem("register_email");
         window.localStorage.setItem("user_id", response.data.user_id);
         dispatch(
           slice.actions.logIn({
             isLoggedIn: true,
             token: response.data.token,
+            user_id: response.data.user_id,
           })
         );
 
