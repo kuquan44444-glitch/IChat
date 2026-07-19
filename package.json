@@ -1,25 +1,50 @@
 {
-  "name": "chat",
-  "version": "0.1.0",
+  "name": "chat-app",
+  "version": "1.0.0",
   "private": true,
+  "description": "Unified Railway-ready chat app",
+  "main": "Chat-App-Backend/server.js",
+  "scripts": {
+    "build": "GENERATE_SOURCEMAP=false CI=false react-scripts build",
+    "start": "node Chat-App-Backend/server.js",
+    "test": "react-scripts test"
+  },
   "dependencies": {
     "@dhaiwat10/react-link-preview": "^1.15.0",
     "@emoji-mart/data": "^1.0.6",
     "@emoji-mart/react": "^1.0.1",
     "@emotion/react": "^11.10.4",
     "@emotion/styled": "^11.10.4",
+    "@faker-js/faker": "^7.5.0",
     "@hookform/resolvers": "^2.9.10",
     "@iconify/react": "^4.0.0",
     "@mui/lab": "^5.0.0-alpha.113",
     "@mui/material": "^5.11.1",
     "@reduxjs/toolkit": "^1.9.0",
+    "@sendgrid/mail": "^7.7.0",
     "@testing-library/jest-dom": "^5.16.5",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^13.5.0",
     "aws-sdk": "^2.1348.0",
     "axios": "^1.2.6",
+    "bcryptjs": "^2.4.3",
+    "body-parser": "^1.20.1",
+    "cookie-parser": "^1.4.6",
+    "cookie-session": "^2.0.0",
+    "cors": "^2.8.5",
+    "crypto": "^1.0.1",
+    "dotenv": "^16.4.5",
     "emoji-mart": "^5.2.2",
+    "express": "^4.18.2",
+    "express-mongo-sanitize": "^2.2.0",
+    "express-rate-limit": "^6.7.0",
     "framer-motion": "^7.5.3",
+    "helmet": "^6.0.1",
+    "jsonwebtoken": "^9.0.0",
+    "mongodb": "^6.9.0",
+    "mongoose": "^6.13.3",
+    "morgan": "^1.10.0",
+    "otp-generator": "^4.0.0",
     "phosphor-react": "^1.4.1",
     "prop-types": "^15.8.1",
     "react": "^18.2.0",
@@ -36,24 +61,14 @@
     "redux": "^4.2.0",
     "redux-persist": "^6.0.0",
     "simplebar-react": "^2.4.3",
+    "socket.io": "^4.6.0",
     "socket.io-client": "^4.6.0",
     "stylis-plugin-rtl": "^2.0.2",
     "uuidv4": "^6.2.13",
     "web-vitals": "^2.1.4",
+    "xss-clean": "^0.1.1",
     "yup": "^0.32.11",
     "zego-express-engine-webrtc": "^2.23.0"
-  },
-  "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject"
-  },
-  "eslintConfig": {
-    "extends": [
-      "react-app",
-      "react-app/jest"
-    ]
   },
   "browserslist": {
     "production": [
@@ -66,8 +81,5 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
-  },
-  "devDependencies": {
-    "@faker-js/faker": "^7.5.0"
   }
 }
