@@ -141,10 +141,9 @@ const DashboardLayout = () => {
     };
   }, [isLoggedIn, socket]);
 
-  // Skip authentication for testing
-  // if (!isLoggedIn) {
-  //   return <Navigate to={"/auth/login"} />;
-  // }
+  if (!isLoggedIn) {
+    return <Navigate to={"/auth/login"} />;
+  }
 
   return (
     <>

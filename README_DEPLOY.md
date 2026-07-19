@@ -22,18 +22,23 @@ Backend Express trong `Chat-App-Backend/` se phuc vu static files sau khi build 
 
 Tao cac bien moi truong tu `.env.example`:
 
-- `PORT`: Railway tu cap, co the de Railway override
-- `DATABASE`: MongoDB connection string
-- `JWT_SECRET`: JWT secret
-- `CLIENT_URL`: domain public cua app, vi du `https://your-app.up.railway.app`
-- `ZEGO_APP_ID`
-- `ZEGO_SERVER_SECRET`
-- `SG_KEY`
+- Bat buoc de app boot: `DATABASE`, `JWT_SECRET`
+- Khuyen nghi cho Railway production: `NODE_ENV=production`, `CLIENT_URL`
+- Tuy chon / do Railway cap: `PORT`
+- Feature flag cho test nhanh auth: `ENABLE_EMAIL_VERIFICATION=true`
+- Khi `ENABLE_EMAIL_VERIFICATION=false`: bo qua gui OTP email, user moi duoc set `verified=true`, login duoc ngay de test tren Railway
+- Khi `ENABLE_EMAIL_VERIFICATION=true`: OTP + verify email hoat dong lai nhu binh thuong
+- Bien theo tinh nang:
+  - `SG_KEY`: bat buoc neu can gui email OTP / reset password
+  - `ZEGO_APP_ID`: bat buoc neu can audio/video call
+  - `ZEGO_SERVER_SECRET`: bat buoc neu can audio/video call
 
 Ghi chu:
 
 - `REACT_APP_API_URL` de trong neu frontend va backend cung domain
 - `REACT_APP_SOCKET_URL` de trong neu Socket.IO dung cung domain
+- `REACT_APP_*` la build-time env, phai set truoc khi chay `npm run build`
+- Neu khong dung email trong giai doan smoke test, co the tam dat `ENABLE_EMAIL_VERIFICATION=false`
 
 ## Lenh Railway can chay
 

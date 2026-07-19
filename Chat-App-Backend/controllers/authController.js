@@ -11,6 +11,7 @@ const otp = require("../Templates/Mail/otp");
 const resetPassword = require("../Templates/Mail/resetPassword");
 const { promisify } = require("util");
 const catchAsync = require("../utils/catchAsync");
+const { isEmailVerificationEnabled } = require("../config/authFlags");
 
 // this function will return you jwt token
 const signToken = (userId) => jwt.sign({ userId }, process.env.JWT_SECRET);
@@ -21,6 +22,7 @@ const signToken = (userId) => jwt.sign({ userId }, process.env.JWT_SECRET);
 
 exports.register = catchAsync(async (req, res, next) => {
   const { firstName, lastName, email, password } = req.body;
+  const emailVerificationEnabled = isEmailVerificationEnabled();
 
   const filteredBody = filterObj(
     req.body,
@@ -43,17 +45,23 @@ exports.register = catchAsync(async (req, res, next) => {
   } else if (existing_user) {
     // if not verified than update prev one
 
-    await User.findOneAndUpdate({ email: email }, filteredBody, {
-      new: true,
-      validateModifiedOnly: true,
-    });
+    existing_user.firstName = filteredBody.firstName;
+    existing_user.lastName = filteredBody.lastName;
+    existing_user.email = filteredBody.email;
+    existing_user.password = filteredBody.password;
+    existing_user.verified = emailVerificationEnabled
+      ? existing_user.verified
+      : true;
+    await existing_user.save({ new: true, validateModifiedOnly: true });
 
     // generate an otp and send to email
     req.userId = existing_user._id;
     next();
   } else {
-    // if user is not created before than create a new one
-    const new_user = await User.create(filteredBody);
+    const new_user = await User.create({
+      ...filteredBody,
+      verified: emailVerificationEnabled ? false : true,
+    });
 
     // generate an otp and send to email
     req.userId = new_user._id;
@@ -63,6 +71,28 @@ exports.register = catchAsync(async (req, res, next) => {
 
 exports.sendOTP = catchAsync(async (req, res, next) => {
   const { userId } = req;
+  const emailVerificationEnabled = isEmailVerificationEnabled();
+
+  if (!emailVerificationEnabled) {
+    await User.findByIdAndUpdate(
+      userId,
+      {
+        verified: true,
+        otp: undefined,
+        otp_expiry_time: undefined,
+      },
+      {
+        new: true,
+        validateModifiedOnly: true,
+      }
+    );
+
+    return res.status(200).json({
+      status: "success",
+      message: "OTP Sent Successfully!",
+    });
+  }
+
   const new_otp = otpGenerator.generate(6, {
     upperCaseAlphabets: false,
     specialChars: false,
@@ -82,7 +112,7 @@ exports.sendOTP = catchAsync(async (req, res, next) => {
   console.log(new_otp);
 
   // TODO send mail
-  mailService.sendEmail({
+  await mailService.sendEmail({
     from: "infogmk02@gmail.com",
     to: user.email,
     subject: "Verification OTP",
@@ -99,6 +129,33 @@ exports.sendOTP = catchAsync(async (req, res, next) => {
 exports.verifyOTP = catchAsync(async (req, res, next) => {
   // verify otp and update user accordingly
   const { email, otp } = req.body;
+  const emailVerificationEnabled = isEmailVerificationEnabled();
+
+  if (!emailVerificationEnabled) {
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(400).json({
+        status: "error",
+        message: "Email is invalid or OTP expired",
+      });
+    }
+
+    user.verified = true;
+    user.otp = undefined;
+    user.otp_expiry_time = undefined;
+    await user.save({ new: true, validateModifiedOnly: true });
+
+    const token = signToken(user._id);
+
+    return res.status(200).json({
+      status: "success",
+      message: "OTP verified Successfully!",
+      token,
+      user_id: user._id,
+    });
+  }
+
   const user = await User.findOne({
     email,
     otp_expiry_time: { $gt: Date.now() },
@@ -131,6 +188,7 @@ exports.verifyOTP = catchAsync(async (req, res, next) => {
 
   user.verified = true;
   user.otp = undefined;
+  user.otp_expiry_time = undefined;
   await user.save({ new: true, validateModifiedOnly: true });
 
   const token = signToken(user._id);
@@ -143,11 +201,9 @@ exports.verifyOTP = catchAsync(async (req, res, next) => {
   });
 });
 
-// User Login - Mock version for testing
 exports.login = catchAsync(async (req, res, next) => {
   const { email, password } = req.body;
-
-  console.log("Login attempt:", email, password);
+  const emailVerificationEnabled = isEmailVerificationEnabled();
 
   if (!email || !password) {
     res.status(400).json({
@@ -157,26 +213,32 @@ exports.login = catchAsync(async (req, res, next) => {
     return;
   }
 
-  // Mock authentication for testing
-  // Accept any email/password combination for now
-  const mockUser = {
-    _id: "mock_user_id_123",
-    email: email,
-    firstName: "Test",
-    lastName: "User"
-  };
+  const user = await User.findOne({ email }).select("+password");
 
-  const token = signToken(mockUser._id);
+  if (!user || !(await user.correctPassword(password, user.password))) {
+    return res.status(400).json({
+      status: "error",
+      message: "Email or password is incorrect",
+    });
+  }
+
+  if (emailVerificationEnabled && !user.verified) {
+    return res.status(401).json({
+      status: "error",
+      message: "Please verify your email before logging in.",
+    });
+  }
+
+  const token = signToken(user._id);
 
   res.status(200).json({
     status: "success",
     message: "Logged in successfully!",
     token,
-    user_id: mockUser._id,
+    user_id: user._id,
   });
 });
 
-// Protect - Mock version for testing
 exports.protect = catchAsync(async (req, res, next) => {
   // 1) Getting token and check if it's there
   let token;
@@ -198,18 +260,24 @@ exports.protect = catchAsync(async (req, res, next) => {
   // 2) Verification of token
   const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
 
-  console.log("Token decoded:", decoded);
+  const currentUser = await User.findById(decoded.userId);
 
-  // Mock user for testing
-  const mockUser = {
-    _id: decoded.userId,
-    email: "test@example.com",
-    firstName: "Test",
-    lastName: "User"
-  };
+  if (!currentUser) {
+    return res.status(401).json({
+      status: "error",
+      message: "The user belonging to this token no longer exists.",
+    });
+  }
+
+  if (currentUser.changedPasswordAfter(decoded.iat)) {
+    return res.status(401).json({
+      status: "error",
+      message: "User recently changed password! Please log in again.",
+    });
+  }
 
   // GRANT ACCESS TO PROTECTED ROUTE
-  req.user = mockUser;
+  req.user = currentUser;
   next();
 });
 
@@ -236,7 +304,7 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
 
     console.log(resetURL);
 
-    mailService.sendEmail({
+    await mailService.sendEmail({
       from: "infogmk02@gmail.com",
       to: user.email,
       subject: "Reset Password",

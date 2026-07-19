@@ -1,13 +1,12 @@
-import { Link as RouterLink } from "react-router-dom";
-// sections
-import { Stack, Typography, Link } from "@mui/material";
-import AuthSocial from "../../sections/auth/AuthSocial";
-import Login from "../../sections/auth/LoginForm";
+import { Stack, Typography } from "@mui/material";
+import { useSelector } from "react-redux";
 import VerifyForm from "../../sections/auth/VerifyForm";
 
 // ----------------------------------------------------------------------
 
 export default function LoginPage() {
+  const { email } = useSelector((state) => state.auth);
+
   return (
     <>
       <Stack spacing={2} sx={{ mb: 5, position: "relative" }}>
@@ -15,7 +14,7 @@ export default function LoginPage() {
 
         <Stack direction="row" spacing={0.5}>
           <Typography variant="body2">
-            Sent to email (shreyanshshah242@gmail.com)
+            Sent to email ({email || "your registered email"})
           </Typography>
         </Stack>
       </Stack>

@@ -5,13 +5,21 @@ import { showSnackbar } from "./app";
 
 // ----------------------------------------------------------------------
 
+const getStoredValue = (key) => {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return window.localStorage.getItem(key) || "";
+};
+
 const initialState = {
-  isLoggedIn: true, // Skip authentication - set to true by default
-  token: "mock_token_123",
+  isLoggedIn: Boolean(getStoredValue("accessToken")),
+  token: getStoredValue("accessToken"),
   isLoading: false,
   user: null,
-  user_id: "mock_user_id_123",
-  email: "test@example.com",
+  user_id: getStoredValue("user_id") || null,
+  email: "",
   error: false,
 };
 
@@ -60,10 +68,12 @@ export function NewPassword(formValues) {
       )
       .then(function (response) {
         console.log(response);
+        window.localStorage.setItem("accessToken", response.data.token);
         dispatch(
             slice.actions.logIn({
               isLoggedIn: true,
               token: response.data.token,
+              user_id: response.data.user_id || null,
             })
           );
         dispatch(
@@ -139,6 +149,7 @@ export function LoginUser(formValues) {
       )
       .then(function (response) {
         console.log(response);
+        window.localStorage.setItem("accessToken", response.data.token);
         dispatch(
           slice.actions.logIn({
             isLoggedIn: true,
@@ -166,6 +177,7 @@ export function LoginUser(formValues) {
 
 export function LogoutUser() {
   return async (dispatch, getState) => {
+    window.localStorage.removeItem("accessToken");
     window.localStorage.removeItem("user_id");
     dispatch(slice.actions.signOut());
   };
@@ -234,11 +246,13 @@ export function VerifyEmail(formValues) {
       .then(function (response) {
         console.log(response);
         dispatch(slice.actions.updateRegisterEmail({ email: "" }));
+        window.localStorage.setItem("accessToken", response.data.token);
         window.localStorage.setItem("user_id", response.data.user_id);
         dispatch(
           slice.actions.logIn({
             isLoggedIn: true,
             token: response.data.token,
+            user_id: response.data.user_id,
           })
         );
 

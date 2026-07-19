@@ -1,6 +1,14 @@
 const sgMail = require("@sendgrid/mail");
 
-sgMail.setApiKey(process.env.SG_KEY);
+const isSendGridConfigured = () => Boolean(process.env.SG_KEY);
+
+const ensureSendGridClient = () => {
+  if (!isSendGridConfigured()) {
+    throw new Error("SendGrid is not configured");
+  }
+
+  sgMail.setApiKey(process.env.SG_KEY);
+};
 
 const sendSGMail = async ({
   to,
@@ -11,6 +19,8 @@ const sendSGMail = async ({
   text,
 }) => {
   try {
+    ensureSendGridClient();
+
     const from = "infogmk01@gmail.com";
 
     const msg = {
@@ -26,13 +36,10 @@ const sendSGMail = async ({
     return sgMail.send(msg);
   } catch (error) {
     console.log(error);
+    throw error;
   }
 };
 
 exports.sendEmail = async (args) => {
-  if (!process.env.NODE_ENV === "development") {
-    return Promise.resolve();
-  } else {
-    return sendSGMail(args);
-  }
+  return sendSGMail(args);
 };
